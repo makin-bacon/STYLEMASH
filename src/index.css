@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/* App runs full-viewport height so the two-column workspace can fill the window. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+}
