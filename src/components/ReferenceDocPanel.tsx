@@ -48,7 +48,7 @@ export function ReferenceDocPanel({
     <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-2">
       <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Style reference (Document B)
+          Style reference (Document B – Optional)
         </p>
         {referenceDoc.status === 'empty' && (
           <p className="mt-0.5 text-sm text-slate-500">

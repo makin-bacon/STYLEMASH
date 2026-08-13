@@ -121,7 +121,7 @@ export function StyleReportPanel({
           onClick={onMergeSelected}
           className="w-full rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white enabled:hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          Merge Selected {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
+          Do it {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
         </button>
       </div>
     </div>

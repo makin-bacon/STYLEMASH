@@ -59,7 +59,7 @@ That's it — StyleRipper is now running entirely on your machine. No account, n
 
 1. **Drag and drop** a `.docx` or `.dotx` file onto the browser window (or click to browse for one).
 2. StyleRipper reads the document and shows a **Style Report**: every distinct text appearance it found, most common first, each with a live preview, its resolved attributes (font, size, color, bold/italic/underline/strikethrough), and where it came from (a named style, or direct formatting with no style at all).
-3. **Select** one or more entries (checkboxes) and click **Merge Selected** to fold them into a single named style — pick an existing style to merge into, or create a new one.
+3. **Select** one or more entries (checkboxes) and click **Do it** to fold them into a single named style — pick an existing style to merge into, or create a new one.
 4. Use **+ New Style** in the "User-Created Styles" panel to define a style from scratch, or **Edit** to tweak one you've already created.
 5. Need to fix something the UI doesn't expose? Click **Edit XML** on any entry to hand-edit its underlying `<w:rPr>` XML directly.
 6. Click **Save locally** at any time to download the result. The file keeps its original format and filename, with `-RIPPED` appended (e.g. `Report.docx` → `Report-RIPPED.docx`).

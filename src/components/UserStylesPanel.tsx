@@ -41,7 +41,7 @@ export function UserStylesPanel({ userStyles, styleReport, onEditStyle, onCreate
       <ul className="min-h-0 flex-1 overflow-y-auto">
         {userStyles.length === 0 && (
           <li className="px-4 py-6 text-center text-sm text-slate-400">
-            Select entries in the Style Report and click "Merge Selected", or click "+ New Style"
+            Select entries in the Style Report and click "Do it", or click "+ New Style"
             to define one from scratch.
           </li>
         )}
