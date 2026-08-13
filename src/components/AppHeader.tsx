@@ -12,10 +12,10 @@ interface AppHeaderProps {
  * layout shell. */
 export function AppHeader({ filename, onLoadDifferentFile, children }: AppHeaderProps) {
   return (
-    <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
+    <header className="flex items-center justify-between border-b border-slate-200 bg-gray-800 px-6 py-3">
       <div>
-        <h1 className="text-lg font-bold text-slate-800">StyleRipper</h1>
-        {filename && <p className="text-xs text-slate-500">{filename}</p>}
+        <h1 className="text-lg font-bold text-slate-200">StyleRipper</h1>
+        {filename && <p className="text-xs text-slate-500">CURRENTLY RIPPING: {filename}</p>}
       </div>
 
       <div className="flex items-center gap-3">
