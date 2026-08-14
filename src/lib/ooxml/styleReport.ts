@@ -1,4 +1,12 @@
-import type { FormattingSignature, ParsedDocx, RunRef, StyleEntity, StyleEntityVariant, StyleOrigin } from '../../types/ooxml'
+import type {
+  FormattingSignature,
+  ParsedDocx,
+  RunRef,
+  StyleEntity,
+  StyleEntityVariant,
+  StyleOrigin,
+  UserStyleRecord,
+} from '../../types/ooxml'
 import { NS } from './constants'
 import { wChildren } from './domUtils'
 import { signatureToKey } from './signature'
@@ -134,4 +142,29 @@ export function countOccurrencesForStyleId(styleReport: StyleEntity[], styleId: 
     }
   }
   return total
+}
+
+/** How far through "merge everything into a User-Created style" the
+ * document currently is - drives the Style Report's progress bar. Counted
+ * at the variant level (the same granularity as selection/merging itself):
+ * a variant counts as "merged" once its look is controlled by a named
+ * character style that's tracked as a UserStyleRecord; every other variant
+ * (direct formatting, or still under one of the document's own original
+ * named styles) counts as remaining. */
+export function computeMergeProgress(
+  styleReport: StyleEntity[],
+  userStyles: UserStyleRecord[],
+): { total: number; merged: number; remaining: number } {
+  const userStyleIds = new Set(userStyles.map((r) => r.styleId))
+  let total = 0
+  let merged = 0
+  for (const entity of styleReport) {
+    for (const variant of entity.variants) {
+      total += 1
+      if (variant.origin.kind === 'named-character' && userStyleIds.has(variant.origin.styleId)) {
+        merged += 1
+      }
+    }
+  }
+  return { total, merged, remaining: total - merged }
 }

@@ -1,16 +1,18 @@
-import type { ReactNode } from 'react'
+import { useState } from 'react'
+import { HelpModal } from './HelpModal'
 
 interface AppHeaderProps {
   filename: string | null
   onLoadDifferentFile: () => void
-  children?: ReactNode
 }
 
 /** Top bar: app name, currently-loaded filename, and a way back to the
- * upload screen. `children` is where App.tsx slots in the SaveButton, kept
- * as a prop rather than hardcoded here so this component stays a dumb
- * layout shell. */
-export function AppHeader({ filename, onLoadDifferentFile, children }: AppHeaderProps) {
+ * upload screen. The Help button/modal is self-contained (no workspace
+ * state involved), so its open/closed state lives locally here rather than
+ * being lifted into App.tsx. */
+export function AppHeader({ filename, onLoadDifferentFile }: AppHeaderProps) {
+  const [isHelpOpen, setIsHelpOpen] = useState(false)
+
   return (
     <header className="flex items-center justify-between border-b border-slate-200 bg-gray-800 px-6 py-3">
       <div>
@@ -28,8 +30,16 @@ export function AppHeader({ filename, onLoadDifferentFile, children }: AppHeader
             Rip a different file
           </button>
         )}
-        {children}
+        <button
+          type="button"
+          onClick={() => setIsHelpOpen(true)}
+          className="rounded-md border border-slate-500 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+        >
+          Help
+        </button>
       </div>
+
+      {isHelpOpen && <HelpModal onClose={() => setIsHelpOpen(false)} />}
     </header>
   )
 }

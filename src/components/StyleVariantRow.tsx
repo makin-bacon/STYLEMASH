@@ -28,15 +28,25 @@ export function StyleVariantRow({
 }: StyleVariantRowProps) {
   return (
     <li
-      className={`flex items-start gap-3 border-b border-slate-200 py-3 last:border-b-0 ${
-        indented ? 'pl-9 pr-4' : 'px-4'
-      } ${selected ? 'bg-indigo-50' : 'bg-white'}`}
+      onClick={onToggleSelect}
+      className={`flex cursor-pointer items-start gap-3 border-b border-l-4 border-slate-200 py-3 transition-colors last:border-b-0 ${
+        indented ? 'pl-8 pr-4' : 'px-4'
+      } ${
+        selected
+          ? 'border-l-indigo-500 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200'
+          : 'border-l-transparent bg-white hover:bg-slate-50 active:bg-slate-100'
+      }`}
     >
+      {/* Visually hidden, not removed - the row's highlight color is the
+          visible selected-state indicator, but this keeps the row
+          keyboard-focusable/toggleable and announced correctly by screen
+          readers. */}
       <input
         type="checkbox"
         checked={selected}
         onChange={onToggleSelect}
-        className="mt-1 size-4 shrink-0 accent-indigo-600"
+        onClick={(e) => e.stopPropagation()}
+        className="sr-only"
         aria-label={`Select: ${describeOrigin(variant.origin)}`}
       />
 
@@ -54,7 +64,10 @@ export function StyleVariantRow({
         </span>
         <button
           type="button"
-          onClick={onEditXml}
+          onClick={(e) => {
+            e.stopPropagation()
+            onEditXml()
+          }}
           className="text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
         >
           Edit XML

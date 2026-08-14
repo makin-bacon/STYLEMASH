@@ -38,6 +38,11 @@ export interface WorkspaceState {
    * style-derived instance and a direct-override instance of the same
    * visual look can be selected/merged independently. */
   selectedVariantIds: Set<string>
+  /** The single User-Created style currently picked as a merge target (a
+   * click on its row in UserStylesPanel, distinct from that row's "Edit"
+   * button) - lets selectedVariantIds be folded into it directly via
+   * MERGE_SELECTED_INTO_TARGET, without going through MergeDialog. */
+  selectedTargetStyleId: string | null
   activeEditVariantId: string | null
   mergeDialogOpen: boolean
   /** Set when the merge dialog was opened to edit/extend an existing
@@ -67,6 +72,7 @@ const initialState: WorkspaceState = {
   styleReport: [],
   userStyles: [],
   selectedVariantIds: new Set(),
+  selectedTargetStyleId: null,
   activeEditVariantId: null,
   mergeDialogOpen: false,
   mergeDialogReuseStyleId: null,
@@ -108,6 +114,9 @@ type Action =
   | { type: 'CONTENT_MERGE_ERROR'; message: string }
   | { type: 'SELECT_VARIANTS'; variantIds: string[] }
   | { type: 'BULK_MERGE_MATCHED_TO_REFERENCE' }
+  | { type: 'RESET' }
+  | { type: 'TOGGLE_SELECT_TARGET_STYLE'; styleId: string }
+  | { type: 'MERGE_SELECTED_INTO_TARGET' }
 
 /** Note on the reducer's relationship to immutability: `parsedDocx`'s inner
  * XMLDocuments (documentXml/stylesXml) are mutated in place by mergeStyles()
@@ -199,6 +208,7 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
           styleReport,
           userStyles,
           selectedVariantIds: new Set(),
+          selectedTargetStyleId: null,
           mergeDialogOpen: false,
           mergeDialogReuseStyleId: null,
           mergeError: null,
@@ -269,6 +279,11 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
         referenceDoc: initialReferenceDocState,
         // styleReport unchanged for the same reason as REFERENCE_DOC_LOADED:
         // only removing zero-occurrence style *definitions*.
+        // Clear a dangling target selection if the style it pointed to was
+        // one of the just-removed zero-occurrence ones.
+        selectedTargetStyleId: userStyles.some((r) => r.styleId === state.selectedTargetStyleId)
+          ? state.selectedTargetStyleId
+          : null,
       }
     }
 
@@ -309,6 +324,43 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
         }
       } catch (err) {
         return { ...state, bulkMergeError: err instanceof Error ? err.message : 'Bulk merge failed.' }
+      }
+    }
+
+    case 'RESET':
+      return initialState
+
+    case 'TOGGLE_SELECT_TARGET_STYLE':
+      return {
+        ...state,
+        selectedTargetStyleId: state.selectedTargetStyleId === action.styleId ? null : action.styleId,
+      }
+
+    case 'MERGE_SELECTED_INTO_TARGET': {
+      if (!state.parsedDocx || !state.selectedTargetStyleId) return state
+      const targetRecord = state.userStyles.find((r) => r.styleId === state.selectedTargetStyleId)
+      if (!targetRecord) return state
+
+      const sourceRunRefs = collectRunRefsForVariantIds(state.styleReport, state.selectedVariantIds)
+      try {
+        mergeStyles(
+          state.parsedDocx,
+          sourceRunRefs,
+          targetRecord.targetSignature,
+          targetRecord.name,
+          targetRecord.styleId,
+        )
+        const styleReport = buildStyleReport(state.parsedDocx)
+        return {
+          ...state,
+          parsedDocx: { ...state.parsedDocx },
+          styleReport,
+          selectedVariantIds: new Set(),
+          selectedTargetStyleId: null,
+          mergeError: null,
+        }
+      } catch (err) {
+        return { ...state, mergeError: err instanceof Error ? err.message : 'Merge failed.' }
       }
     }
 
@@ -430,6 +482,17 @@ export function useDocxWorkspace() {
     dispatch({ type: 'BULK_MERGE_MATCHED_TO_REFERENCE' })
   }, [])
 
+  /** Returns to the landing screen in-app (no browser reload) - used by
+   * AppHeader's "Rip a different file" button, so the persistent
+   * header/footer never flicker/remount along the way. */
+  const reset = useCallback(() => dispatch({ type: 'RESET' }), [])
+
+  const toggleSelectTargetStyle = useCallback((styleId: string) => {
+    dispatch({ type: 'TOGGLE_SELECT_TARGET_STYLE', styleId })
+  }, [])
+
+  const mergeSelectedIntoTarget = useCallback(() => dispatch({ type: 'MERGE_SELECTED_INTO_TARGET' }), [])
+
   // Summary of the current selection, for MergeDialog's prefill/messaging -
   // exposed as derived totals rather than raw entities/variants so the
   // dialog stays decoupled from the report's grouping shape.
@@ -472,6 +535,9 @@ export function useDocxWorkspace() {
       mergeContentIntoReferenceDoc,
       selectVariantsMatchingReferenceStyles,
       bulkMergeMatchedToReference,
+      reset,
+      toggleSelectTargetStyle,
+      mergeSelectedIntoTarget,
     },
   }
 }

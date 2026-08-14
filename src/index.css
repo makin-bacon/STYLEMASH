@@ -7,6 +7,31 @@ body,
   height: 100%;
 }
 
+/* The body itself never scrolls - the workspace fills exactly the
+   viewport height (see above), and each panel's own list handles its own
+   overflow (see StyleReportPanel/UserStylesPanel's `overflow-y-auto`
+   lists). This guards against long lists/content ever growing the body
+   taller than the viewport and putting a scrollbar on the page itself. */
 body {
   margin: 0;
+  overflow: hidden;
+}
+
+/* Simple entrance animation for the landing <-> workspace transition (see
+   App.tsx - the two top-level views are given distinct `key`s so React
+   remounts a fresh element on switch, which is what lets this replay).
+   Opacity-only, deliberately - the root element is h-full (exactly viewport
+   height), so any translate/scale here would momentarily push it past the
+   container's edge and flash a scrollbar for the animation's duration. */
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.page-transition {
+  animation: page-fade-in 280ms ease-out;
 }

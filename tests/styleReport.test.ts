@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import type { UserStyleRecord } from '../src/types/ooxml'
 import {
   buildStyleReport,
   collectRunRefsForVariantIds,
+  computeMergeProgress,
   findVariantById,
 } from '../src/lib/ooxml/styleReport'
 import { makeParsedDocx } from './testUtils'
@@ -101,5 +103,43 @@ describe('buildStyleReport', () => {
     const runRefs = collectRunRefsForVariantIds(report, new Set([boldVariant.id, italicVariant.id]))
     expect(runRefs).toHaveLength(2)
     expect(runRefs).toEqual(expect.arrayContaining([...boldVariant.runRefs, ...italicVariant.runRefs]))
+  })
+})
+
+describe('computeMergeProgress', () => {
+  const NEUTRAL_SIGNATURE = {
+    fontFamily: null,
+    fontSizeHalfPt: null,
+    colorValue: 'auto',
+    bold: false,
+    italic: false,
+    underline: null,
+    strike: false,
+  } as const
+
+  it('counts a variant as merged only when it points at a tracked UserStyleRecord styleId', () => {
+    const stylesXml = `<w:styles ${W}>
+      <w:style w:type="character" w:styleId="Tracked"><w:name w:val="Tracked"/></w:style>
+      <w:style w:type="character" w:styleId="Untracked"><w:name w:val="Untracked"/></w:style>
+    </w:styles>`
+    const documentXml = `<w:document ${W}><w:body>
+      <w:p><w:r><w:rPr><w:rStyle w:val="Tracked"/></w:rPr><w:t>Merged already</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:rStyle w:val="Untracked"/></w:rPr><w:t>Named but not ours</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Direct formatting</w:t></w:r></w:p>
+    </w:body></w:document>`
+
+    const report = buildStyleReport(makeParsedDocx({ documentXml, stylesXml }))
+    const userStyles: UserStyleRecord[] = [
+      { styleId: 'Tracked', name: 'Tracked', targetSignature: NEUTRAL_SIGNATURE, createdAt: 1 },
+    ]
+
+    const progress = computeMergeProgress(report, userStyles)
+    expect(progress).toEqual({ total: 3, merged: 1, remaining: 2 })
+  })
+
+  it('reports 0/0 for an empty report', () => {
+    const documentXml = `<w:document ${W}><w:body></w:body></w:document>`
+    const report = buildStyleReport(makeParsedDocx({ documentXml }))
+    expect(computeMergeProgress(report, [])).toEqual({ total: 0, merged: 0, remaining: 0 })
   })
 })
