@@ -1,11 +1,47 @@
-import type { ReactNode } from 'react'
+import type { ReferenceDocState } from '../hooks/useDocxWorkspace'
 import type { StyleEntity, UserStyleRecord } from '../types/ooxml'
+import type { ParagraphMarker } from '../lib/ooxml/numbering'
 import { countOccurrencesForStyleId } from '../lib/ooxml/styleReport'
 import { signatureToCss } from '../lib/signatureToCss'
+import { AttachReferenceDocButton } from './AttachReferenceDocButton'
+import { InfoTooltip } from './InfoTooltip'
+
+/** Finds a representative list marker for a User-Created style, the same
+ * way StyleReportPanel does for a Style Report variant - looked up by
+ * styleId (rather than taking a variant directly) since a UserStyleRecord
+ * doesn't have one, just the styleId every variant it controls shares.
+ * Matches both character (w:rStyle) and paragraph (w:pStyle) origins, since
+ * a UserStyleRecord can be either kind. Returns the first matching variant's
+ * marker, so a style that's been merged from list-item occurrences keeps
+ * showing that it's a list style here too, not just in the Style
+ * Report/preview. */
+function markerForStyleId(
+  styleReport: StyleEntity[],
+  styleId: string,
+  paragraphMarkers: Map<Element, ParagraphMarker>,
+): ParagraphMarker | undefined {
+  for (const entity of styleReport) {
+    for (const variant of entity.variants) {
+      if (
+        (variant.origin.kind !== 'named-character' && variant.origin.kind !== 'named-paragraph') ||
+        variant.origin.styleId !== styleId
+      ) {
+        continue
+      }
+      const paragraphEl = variant.runRefs[0]?.paragraphElement
+      const marker = paragraphEl && paragraphMarkers.get(paragraphEl)
+      if (marker) return marker
+    }
+  }
+  return undefined
+}
 
 interface UserStylesPanelProps {
   userStyles: UserStyleRecord[]
   styleReport: StyleEntity[]
+  /** Resolved list marker per paragraph, shared with StyleReportPanel and
+   * DocumentPreviewPanel - see markerForStyleId above. */
+  paragraphMarkers: Map<Element, ParagraphMarker>
   onEditStyle: (styleId: string) => void
   onCreateNewStyle: () => void
   /** The single style currently picked as a merge target (row click, not
@@ -19,13 +55,15 @@ interface UserStylesPanelProps {
   /** Surfaced here (not just in MergeDialog) since MERGE_SELECTED_INTO_TARGET
    * has no dialog of its own to show it in. */
   mergeError: string | null
-  /** Footer slot for SaveButton, kept as a prop (rather than hardcoded here)
-   * for the same reason AppHeader takes it as children - this component
-   * stays a dumb layout shell. */
-  children?: ReactNode
+  /** Drives the footer's "Attach Document B (optional)" button while
+   * nothing's attached, and its "Remove Document B" button once one is -
+   * same footer slot either way, just swapping which button occupies it. */
+  referenceDoc: ReferenceDocState
+  onAttachReferenceDoc: (file: File) => void
+  onRemoveReferenceDoc: () => void
 }
 
-/** Right-hand panel: the named styles StyleRipper has created via merges
+/** Right-hand panel: the named styles StyleMash has created via merges
  * this session. Occurrence counts are always re-derived from the latest
  * Style Report (via countOccurrencesForStyleId) rather than hand-maintained,
  * so they can never drift out of sync with the actual document state.
@@ -41,6 +79,7 @@ interface UserStylesPanelProps {
 export function UserStylesPanel({
   userStyles,
   styleReport,
+  paragraphMarkers,
   onEditStyle,
   onCreateNewStyle,
   selectedTargetStyleId,
@@ -48,24 +87,23 @@ export function UserStylesPanel({
   pendingSelectionCount,
   onMergeSelectedIntoTarget,
   mergeError,
-  children,
+  referenceDoc,
+  onAttachReferenceDoc,
+  onRemoveReferenceDoc,
 }: UserStylesPanelProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2">
+      <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-800 px-4 py-4">
         <div>
-          <h2 className="text-sm font-semibold text-slate-700">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-200">
             User-Created Styles <span className="font-normal text-slate-400">({userStyles.length})</span>
+            <InfoTooltip text="Select entries in the Style Report, then click a style here to merge them. To generate styles, hit the &quot;+ New Style&quot; button or upload a reference document." />
           </h2>
-          <p className="text-xs text-slate-500">
-            Named styles created by merging Style Report entries. Select entries in the Style Report,
-            then click a style here to merge them into it.
-          </p>
         </div>
         <button
           type="button"
           onClick={onCreateNewStyle}
-          className="shrink-0 rounded-md border border-indigo-200 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
+          className="shrink-0 rounded-md border border-indigo-200 px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-600"
         >
           + New Style
         </button>
@@ -82,6 +120,8 @@ export function UserStylesPanel({
         )}
         {userStyles.map((record) => {
           const occurrences = countOccurrencesForStyleId(styleReport, record.styleId)
+          const markerText =
+            markerForStyleId(styleReport, record.styleId, paragraphMarkers)?.text || record.listPreviewText
           const isTarget = selectedTargetStyleId === record.styleId
           return (
             <li
@@ -95,6 +135,7 @@ export function UserStylesPanel({
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-base font-medium" style={signatureToCss(record.targetSignature)}>
+                  {markerText && <span className="mr-1 text-slate-400">{markerText}</span>}
                   {record.name}
                 </p>
                 <p className="mt-1 truncate text-xs text-slate-400">styleId: {record.styleId}</p>
@@ -118,6 +159,15 @@ export function UserStylesPanel({
                     from Document B
                   </span>
                 )}
+                {record.kind === 'paragraph' && (
+                  <span className="rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-600">
+                    {record.listFormat === 'bullet'
+                      ? 'Bulleted list'
+                      : record.listFormat === 'decimal'
+                        ? 'Numbered list'
+                        : 'Paragraph style'}
+                  </span>
+                )}
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
                   {occurrences}×
                 </span>
@@ -137,7 +187,26 @@ export function UserStylesPanel({
         })}
       </ul>
 
-      {children && <div className="border-t border-slate-200 px-4 py-2">{children}</div>}
+      {/* Always rendered (never conditionally mounted) so this row's height
+          never changes as Document B is attached/removed - same reasoning
+          as DocumentPreviewPanel's own footer row. */}
+      <div className="border-t border-slate-200 px-4 py-2">
+        {referenceDoc.status === 'loaded' ? (
+          <button
+            type="button"
+            onClick={onRemoveReferenceDoc}
+            className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+          >
+            Remove Document B
+          </button>
+        ) : (
+          <AttachReferenceDocButton
+            status={referenceDoc.status}
+            errorMessage={referenceDoc.errorMessage}
+            onAttach={onAttachReferenceDoc}
+          />
+        )}
+      </div>
     </div>
   )
 }

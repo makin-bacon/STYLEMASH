@@ -4,6 +4,7 @@ import {
   buildStyleReport,
   collectRunRefsForVariantIds,
   computeMergeProgress,
+  filterUnmergedEntities,
   findVariantById,
 } from '../src/lib/ooxml/styleReport'
 import { makeParsedDocx } from './testUtils'
@@ -141,5 +142,85 @@ describe('computeMergeProgress', () => {
     const documentXml = `<w:document ${W}><w:body></w:body></w:document>`
     const report = buildStyleReport(makeParsedDocx({ documentXml }))
     expect(computeMergeProgress(report, [])).toEqual({ total: 0, merged: 0, remaining: 0 })
+  })
+})
+
+describe('filterUnmergedEntities', () => {
+  const NEUTRAL_SIGNATURE = {
+    fontFamily: null,
+    fontSizeHalfPt: null,
+    colorValue: 'auto',
+    bold: false,
+    italic: false,
+    underline: null,
+    strike: false,
+  } as const
+
+  it('drops only the variants merged into a tracked style, keeping siblings and recomputing the entity total', () => {
+    const stylesXml = `<w:styles ${W}>
+      <w:style w:type="character" w:styleId="Tracked">
+        <w:name w:val="Tracked"/>
+        <w:rPr><w:b/></w:rPr>
+      </w:style>
+    </w:styles>`
+    // Two runs share an identical resolved look (bold) but reached it
+    // differently - one already via the tracked style, one still direct -
+    // so they land in the same entity as two variants.
+    const documentXml = `<w:document ${W}><w:body>
+      <w:p><w:r><w:rPr><w:rStyle w:val="Tracked"/></w:rPr><w:t>Already merged</w:t></w:r></w:p>
+      <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Still direct</w:t></w:r></w:p>
+    </w:body></w:document>`
+
+    const report = buildStyleReport(makeParsedDocx({ documentXml, stylesXml }))
+    expect(report).toHaveLength(1)
+    expect(report[0].variants).toHaveLength(2)
+
+    const userStyles: UserStyleRecord[] = [
+      {
+        styleId: 'Tracked',
+        name: 'Tracked',
+        targetSignature: NEUTRAL_SIGNATURE,
+        kind: 'character',
+        listFormat: 'none',
+        createdAt: 1,
+      },
+    ]
+    const visible = filterUnmergedEntities(report, userStyles)
+
+    expect(visible).toHaveLength(1)
+    expect(visible[0].variants).toHaveLength(1)
+    expect(visible[0].variants[0].origin).toEqual({ kind: 'direct' })
+    expect(visible[0].occurrenceCount).toBe(1) // recomputed, not the original 2
+  })
+
+  it('drops an entity entirely once every one of its variants is merged', () => {
+    const stylesXml = `<w:styles ${W}>
+      <w:style w:type="paragraph" w:styleId="ListStyle"><w:name w:val="List Style"/></w:style>
+    </w:styles>`
+    const documentXml = `<w:document ${W}><w:body>
+      <w:p><w:pPr><w:pStyle w:val="ListStyle"/></w:pPr><w:r><w:t>Fully merged</w:t></w:r></w:p>
+    </w:body></w:document>`
+
+    const report = buildStyleReport(makeParsedDocx({ documentXml, stylesXml }))
+    const userStyles: UserStyleRecord[] = [
+      {
+        styleId: 'ListStyle',
+        name: 'List Style',
+        targetSignature: NEUTRAL_SIGNATURE,
+        kind: 'paragraph',
+        listFormat: 'none',
+        createdAt: 1,
+      },
+    ]
+
+    expect(filterUnmergedEntities(report, userStyles)).toHaveLength(0)
+  })
+
+  it('leaves entities untouched (same object) when nothing in them is merged', () => {
+    const documentXml = `<w:document ${W}><w:body><w:p><w:r><w:t>Untouched</w:t></w:r></w:p></w:body></w:document>`
+    const report = buildStyleReport(makeParsedDocx({ documentXml }))
+    const visible = filterUnmergedEntities(report, [])
+    expect(visible).toEqual(report)
+    expect(visible[0]).toBe(report[0])
   })
 })

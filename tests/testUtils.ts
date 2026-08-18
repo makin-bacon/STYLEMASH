@@ -13,12 +13,14 @@ export function makeParsedDocx(opts: {
   documentXml: string
   stylesXml?: string
   themeXml?: string
+  numberingXml?: string
 }): ParsedDocx {
   return {
     zip: new JSZip(),
     documentXml: parseXmlString(opts.documentXml),
     stylesXml: parseXmlString(opts.stylesXml ?? EMPTY_STYLES),
     themeXml: opts.themeXml ? parseXmlString(opts.themeXml) : null,
+    numberingXml: opts.numberingXml ? parseXmlString(opts.numberingXml) : null,
     originalFilename: 'test.docx',
     originalExtension: 'docx',
   }

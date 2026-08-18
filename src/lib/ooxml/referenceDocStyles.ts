@@ -1,17 +1,31 @@
 import type { ParsedDocx, StyleEntity, UserStyleRecord } from '../../types/ooxml'
-import { mergeStyles, removeStyleById } from './mergeStyles'
+import { mergeParagraphStyle, mergeStyles, removeStyleById } from './mergeStyles'
+import { buildStylePreviewMarker, resolveStyleListFormat } from './numbering'
 import { countOccurrencesForStyleId, buildStyleReport } from './styleReport'
 import { buildResolutionContext, buildStylesMap, getDocDefaultsRPr, resolveStyleRPr } from './styleResolution'
 import { trackedChildrenToSignature } from './signature'
 import { buildThemeColorMap, resolveColorElement } from './themeColor'
 
 /** Materializes every named style Document B actually uses in its own body
- * text as a real character-type <w:style> in `targetDocx` (Document A)'s
- * stylesXml - via the existing mergeStyles() "+ New Style" code path
+ * text as a real <w:style> in `targetDocx` (Document A)'s stylesXml - via
+ * the existing mergeStyles()/mergeParagraphStyle() "+ New Style" code paths
  * (empty sourceRunRefs), so a materialized style is byte-for-byte the same
  * shape, and behaves identically as a reuse target, as any manually-created
- * UserStyleRecord. Mutates targetDocx.stylesXml in place; referenceDocx is
- * read-only.
+ * UserStyleRecord. Mutates targetDocx.stylesXml (and, for a list style,
+ * numberingXml) in place; referenceDocx is read-only.
+ *
+ * A Document B style that's itself a paragraph style carrying list
+ * numbering (its own <w:pPr>/<w:numPr>, or one inherited through its
+ * w:basedOn chain - e.g. a "List Bullet"-alike) is materialized as a
+ * paragraph-kind record with a freshly-created matching bullet/numbered
+ * list in Document A (see resolveStyleListFormat/mergeParagraphStyle) - so
+ * it shows its list marker immediately, the same as a manually-created list
+ * style, rather than only once it happens to pick up its first merged
+ * occurrence. Every other Document B style (the common case) still
+ * materializes as a character style, same as before: this app never tracks
+ * paragraph-level properties besides list numbering, so a plain paragraph
+ * style and a character style achieve the identical visible result for the
+ * 7 attributes StyleMash actually merges.
  *
  * "Used" means: is the origin styleId of some Style Report variant in
  * Document B whose look isn't fully masked by direct formatting (origin
@@ -52,12 +66,26 @@ export function materializeReferenceDocStyles(
       resolveColorElement(colorEl, themeColorsB),
     )
 
-    const newStyleId = mergeStyles(targetDocx, [], signature, bStyle.name)
+    const listFormat =
+      bStyle.type === 'paragraph'
+        ? resolveStyleListFormat(bStyleId, stylesMapB, referenceDocx.numberingXml)
+        : 'none'
+    const listPreviewText =
+      listFormat === 'none'
+        ? undefined
+        : buildStylePreviewMarker(bStyleId, stylesMapB, referenceDocx.numberingXml)
+    const newStyleId =
+      listFormat === 'none'
+        ? mergeStyles(targetDocx, [], signature, bStyle.name)
+        : mergeParagraphStyle(targetDocx, [], signature, bStyle.name, listFormat)
 
     records.push({
       styleId: newStyleId,
       name: bStyle.name,
       targetSignature: signature,
+      kind: listFormat === 'none' ? 'character' : 'paragraph',
+      listFormat,
+      listPreviewText,
       createdAt: Date.now(),
       fromReferenceDoc: true,
     })
@@ -68,11 +96,12 @@ export function materializeReferenceDocStyles(
 /** The other half of the "remove Document B" lifecycle: for every
  * `fromReferenceDoc` record, keeps it (stripped of the flag) if it's
  * actually in use, or fully removes it (record + <w:style> definition) if
- * it never got merged into - a complete undo. Every materialized style is
- * type="character" and only ever applied via w:rStyle (never w:pStyle), so
- * countOccurrencesForStyleId is a complete usage count for these ids, not
- * an approximation. Pure - the caller is expected to bump its own
- * `parsedDocx` wrapper since `stylesXml` is mutated in place. */
+ * it never got merged into - a complete undo. countOccurrencesForStyleId
+ * matches both w:rStyle and w:pStyle usage (see styleReport.ts), so it's a
+ * complete usage count regardless of whether a given materialized style
+ * ended up character- or paragraph-kind (see materializeReferenceDocStyles).
+ * Pure - the caller is expected to bump its own `parsedDocx` wrapper since
+ * `stylesXml` is mutated in place. */
 export function reconcileUserStylesOnReferenceDocRemoval(
   userStyles: UserStyleRecord[],
   styleReport: StyleEntity[],

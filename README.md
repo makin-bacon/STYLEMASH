@@ -1,6 +1,6 @@
-# StyleRipper
+# StyleMash
 
-StyleRipper is a **local-only** browser tool for standardizing text formatting in Microsoft Word documents. Drag in a `.docx`/`.dotx` file, see every distinct text style and appearance it contains (whether from a named Word style or ad-hoc direct formatting), merge groups of them into clean named styles, and save the result — all without ever installing Word or uploading the file anywhere. Everything runs in your browser; the document never leaves your machine.
+StyleMash is a **local-only** browser tool for standardizing text formatting in Microsoft Word documents. Drag in a `.docx`/`.dotx` file, see every distinct text style and appearance it contains (whether from a named Word style or ad-hoc direct formatting), merge groups of them into clean named styles, and save the result — all without ever installing Word or uploading the file anywhere. Everything runs in your browser; the document never leaves your machine.
 
 ## Requirements
 
@@ -8,7 +8,7 @@ You need **Node.js** and **npm** installed to run this project. If you already h
 
 ### Installing Node.js
 
-StyleRipper needs a current LTS release of Node — **Node 18, 20, or 22+**. (An odd-numbered release like Node 19, 21, or 23 will hit dependency issues — see [Troubleshooting](#troubleshooting).)
+StyleMash needs a current LTS release of Node — **Node 18, 20, or 22+**. (An odd-numbered release like Node 19, 21, or 23 will hit dependency issues — see [Troubleshooting](#troubleshooting).)
 
 Check what you already have:
 
@@ -34,7 +34,7 @@ Confirm it worked by re-running `node --version` — you should see `v18.x`, `v2
 1. Open a terminal and navigate into this project folder:
 
    ```bash
-   cd path/to/STYLERIPPER
+   cd path/to/STYLEMASH
    ```
 
 2. Install dependencies (only needed once, or whenever `package.json` changes):
@@ -53,12 +53,12 @@ Confirm it worked by re-running `node --version` — you should see `v18.x`, `v2
 
 5. When you're done, press `Ctrl+C` in the terminal to stop the server.
 
-That's it — StyleRipper is now running entirely on your machine. No account, no sign-in, no network access required beyond the initial `npm install`.
+That's it — StyleMash is now running entirely on your machine. No account, no sign-in, no network access required beyond the initial `npm install`.
 
 ## Using the app
 
 1. **Drag and drop** a `.docx` or `.dotx` file onto the browser window (or click to browse for one).
-2. StyleRipper reads the document and shows a **Style Report**: every distinct text appearance it found, most common first, each with a live preview, its resolved attributes (font, size, color, bold/italic/underline/strikethrough), and where it came from (a named style, or direct formatting with no style at all).
+2. StyleMash reads the document and shows a **Style Report**: every distinct text appearance it found, most common first, each with a live preview, its resolved attributes (font, size, color, bold/italic/underline/strikethrough), and where it came from (a named style, or direct formatting with no style at all).
 3. **Select** one or more entries (checkboxes) and click **Do it** to fold them into a single named style — pick an existing style to merge into, or create a new one.
 4. Use **+ New Style** in the "User-Created Styles" panel to define a style from scratch, or **Edit** to tweak one you've already created.
 5. Need to fix something the UI doesn't expose? Click **Edit XML** on any entry to hand-edit its underlying `<w:rPr>` XML directly.
@@ -98,4 +98,4 @@ This shouldn't happen — please open an issue with the document (or a minimal r
 
 ## Privacy
 
-StyleRipper does all of its work client-side, in your browser. Your document is never uploaded, transmitted, or stored anywhere outside your own machine.
+StyleMash does all of its work client-side, in your browser. Your document is never uploaded, transmitted, or stored anywhere outside your own machine.

@@ -25,7 +25,7 @@ export async function parseDocx(file: File): Promise<ParsedDocx> {
   const lowerName = file.name.toLowerCase()
   const originalExtension: 'docx' | 'dotx' = lowerName.endsWith('.dotx') ? 'dotx' : 'docx'
   if (!lowerName.endsWith('.docx') && !lowerName.endsWith('.dotx')) {
-    throw new DocxParseError('StyleRipper only supports .docx and .dotx files (Office Open XML).')
+    throw new DocxParseError('StyleMash only supports .docx and .dotx files (Office Open XML).')
   }
 
   let zip: JSZip
@@ -54,11 +54,17 @@ export async function parseDocx(file: File): Promise<ParsedDocx> {
   const themeEntry = zip.file(DOCX_PATHS.theme)
   const themeXml = themeEntry ? parseXml(await themeEntry.async('text'), DOCX_PATHS.theme) : null
 
+  const numberingEntry = zip.file(DOCX_PATHS.numbering)
+  const numberingXml = numberingEntry
+    ? parseXml(await numberingEntry.async('text'), DOCX_PATHS.numbering)
+    : null
+
   return {
     zip,
     documentXml,
     stylesXml,
     themeXml,
+    numberingXml,
     originalFilename: file.name,
     originalExtension,
   }

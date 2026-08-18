@@ -52,6 +52,94 @@ describe('materializeReferenceDocStyles', () => {
     }
   })
 
+  it('materializes a Document B paragraph style that carries its own list numbering as a matching paragraph-kind list style', () => {
+    const referenceDocx = makeParsedDocx({
+      documentXml: `<w:document ${W}><w:body>
+        <w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr><w:r><w:t>Bulleted item</w:t></w:r></w:p>
+      </w:body></w:document>`,
+      stylesXml: `<w:styles ${W}>
+        <w:style w:type="paragraph" w:styleId="ListBullet">
+          <w:name w:val="List Bullet"/>
+          <w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr>
+        </w:style>
+      </w:styles>`,
+      numberingXml: `<w:numbering ${W}>
+        <w:abstractNum w:abstractNumId="0">
+          <w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val=""/></w:lvl>
+        </w:abstractNum>
+        <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+      </w:numbering>`,
+    })
+    const targetDocx = makeParsedDocx({
+      documentXml: `<w:document ${W}><w:body><w:p><w:r><w:t>Text</w:t></w:r></w:p></w:body></w:document>`,
+    })
+    expect(targetDocx.numberingXml).toBeNull()
+
+    const records = materializeReferenceDocStyles(targetDocx, referenceDocx)
+
+    expect(records).toHaveLength(1)
+    expect(records[0].kind).toBe('paragraph')
+    expect(records[0].listFormat).toBe('bullet')
+    expect(records[0].listPreviewText).toBe('•')
+
+    const styleEls = Array.from(targetDocx.stylesXml.getElementsByTagNameNS(NS.w, 'style'))
+    expect(styleEls).toHaveLength(1)
+    expect(wAttr(styleEls[0], 'type')).toBe('paragraph')
+
+    // A brand-new numbering.xml was created in Document A with its own
+    // bullet definition - not a copy of Document B's numId=1 (which
+    // wouldn't exist as a real part in Document A's package).
+    expect(targetDocx.numberingXml).not.toBeNull()
+    const abstractEls = targetDocx.numberingXml!.getElementsByTagNameNS(NS.w, 'abstractNum')
+    expect(abstractEls).toHaveLength(1)
+    expect(wAttr(abstractEls[0].getElementsByTagNameNS(NS.w, 'lvl')[0], 'ilvl')).toBe('0')
+  })
+
+  it('captures a multilevel heading style\'s true depth in listPreviewText (Heading 3 one level deeper than Heading 2)', () => {
+    // A single multilevel numbering definition shared by three heading
+    // styles, each pinned to a different level - the standard Word
+    // "Heading 1/2/3 -> 1./1.1./1.1.1." outline convention.
+    const referenceDocx = makeParsedDocx({
+      documentXml: `<w:document ${W}><w:body>
+        <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Intro</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Background</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:t>Details</w:t></w:r></w:p>
+      </w:body></w:document>`,
+      stylesXml: `<w:styles ${W}>
+        <w:style w:type="paragraph" w:styleId="Heading1">
+          <w:name w:val="Heading 1"/>
+          <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+        </w:style>
+        <w:style w:type="paragraph" w:styleId="Heading2">
+          <w:name w:val="Heading 2"/>
+          <w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr>
+        </w:style>
+        <w:style w:type="paragraph" w:styleId="Heading3">
+          <w:name w:val="Heading 3"/>
+          <w:pPr><w:numPr><w:ilvl w:val="2"/><w:numId w:val="1"/></w:numPr></w:pPr>
+        </w:style>
+      </w:styles>`,
+      numberingXml: `<w:numbering ${W}>
+        <w:abstractNum w:abstractNumId="0">
+          <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+          <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2."/></w:lvl>
+          <w:lvl w:ilvl="2"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2.%3."/></w:lvl>
+        </w:abstractNum>
+        <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+      </w:numbering>`,
+    })
+    const targetDocx = makeParsedDocx({
+      documentXml: `<w:document ${W}><w:body><w:p><w:r><w:t>Text</w:t></w:r></w:p></w:body></w:document>`,
+    })
+
+    const records = materializeReferenceDocStyles(targetDocx, referenceDocx)
+    const byName = (name: string) => records.find((r) => r.name === name)!
+
+    expect(byName('Heading 1').listPreviewText).toBe('1.')
+    expect(byName('Heading 2').listPreviewText).toBe('1.1.')
+    expect(byName('Heading 3').listPreviewText).toBe('1.1.1.')
+  })
+
   it('avoids clobbering a pre-existing style of the same name in Document A', () => {
     const referenceDocx = makeParsedDocx({
       documentXml: `<w:document ${W}><w:body>

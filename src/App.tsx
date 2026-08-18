@@ -1,15 +1,16 @@
+import { useMemo } from 'react'
 import { AppFooter } from './components/AppFooter'
 import { AppHeader } from './components/AppHeader'
 import { ContentMergeDialog } from './components/ContentMergeDialog'
+import { DocumentPreviewPanel } from './components/DocumentPreviewPanel'
 import { DropzoneUpload } from './components/DropzoneUpload'
 import { MergeDialog } from './components/MergeDialog'
-import { ReferenceDocPanel } from './components/ReferenceDocPanel'
-import { SaveButton } from './components/SaveButton'
 import { StyleReportPanel } from './components/StyleReportPanel'
 import { UserStylesPanel } from './components/UserStylesPanel'
 import { XmlEditorModal } from './components/XmlEditorModal'
 import { useDocxWorkspace } from './hooks/useDocxWorkspace'
-import { computeMergeProgress } from './lib/ooxml/styleReport'
+import { buildParagraphMarkers } from './lib/ooxml/numbering'
+import { computeMergeProgress, filterUnmergedEntities } from './lib/ooxml/styleReport'
 
 /** Top-level app shell. Owns the single useDocxWorkspace instance and
  * switches between the upload screen and the two-panel workspace based on
@@ -30,53 +31,84 @@ function App() {
   const importedStyleCount = state.userStyles.filter((r) => r.fromReferenceDoc).length
   const isLoaded = state.status === 'loaded'
   const mergeProgress = computeMergeProgress(state.styleReport, state.userStyles)
+  // StyleReportPanel only ever shows what's still outstanding - an entry
+  // already folded into a User-Created style is done, so leaving it
+  // visible would just be clutter (and re-selecting it would be a no-op).
+  // Every other consumer of styleReport (DocumentPreviewPanel,
+  // UserStylesPanel, mergeProgress above) keeps using the full,
+  // unfiltered state.styleReport.
+  const unmergedStyleReport = filterUnmergedEntities(state.styleReport, state.userStyles)
+  // Shared with both panels below so a list paragraph's marker (bullet,
+  // "1.", "b)"...) reads the same way in the live preview and in the Style
+  // Report's sample text, rather than each panel resolving numbering itself.
+  const paragraphMarkers = useMemo(
+    () => (state.parsedDocx ? buildParagraphMarkers(state.parsedDocx) : new Map()),
+    [state.parsedDocx],
+  )
 
   return (
     <div className="flex h-full flex-col bg-slate-50">
-      <AppHeader
-        filename={isLoaded ? (state.parsedDocx?.originalFilename ?? null) : null}
-        onLoadDifferentFile={actions.reset}
-      />
+      <AppHeader filename={isLoaded ? (state.parsedDocx?.originalFilename ?? null) : null} />
 
       {isLoaded ? (
         <div key="workspace" className="page-transition flex min-h-0 flex-1 flex-col">
-          <ReferenceDocPanel
-            referenceDoc={state.referenceDoc}
-            importedStyleCount={importedStyleCount}
-            isMergingContent={state.isMergingContent}
-            onAttach={actions.loadReferenceDoc}
-            onRemove={actions.removeReferenceDoc}
-            onOpenContentMerge={actions.openContentMergeDialog}
-          />
-
-          <main className="grid min-h-0 flex-1 grid-cols-2 gap-4 p-4">
-            <StyleReportPanel
-              styleReport={state.styleReport}
-              selectedIds={state.selectedVariantIds}
-              onToggleSelect={actions.toggleSelectVariant}
-              onEditXml={actions.openXmlEditor}
-              onMergeSelected={() => actions.openMergeDialog()}
-              hasReferenceStyles={importedStyleCount > 0}
-              bulkMergeError={state.bulkMergeError}
-              onSelectMatchingReferenceStyles={actions.selectVariantsMatchingReferenceStyles}
-              onBulkMergeMatched={actions.bulkMergeMatchedToReference}
-              mergeProgress={mergeProgress}
-              onSave={actions.save}
-              onRipAnotherFile={actions.reset}
-            />
-            <UserStylesPanel
-              userStyles={state.userStyles}
-              styleReport={state.styleReport}
-              onEditStyle={actions.openMergeDialog}
-              onCreateNewStyle={() => actions.openMergeDialog()}
-              selectedTargetStyleId={state.selectedTargetStyleId}
-              onToggleSelectTarget={actions.toggleSelectTargetStyle}
-              pendingSelectionCount={state.selectedVariantIds.size}
-              onMergeSelectedIntoTarget={actions.mergeSelectedIntoTarget}
-              mergeError={state.mergeError}
-            >
-              <SaveButton disabled={!state.parsedDocx} isSaving={state.isSaving} onSave={actions.save} />
-            </UserStylesPanel>
+          {/* CSS grid with 4 equal-fr columns: Style Report and User-Created
+              Styles each take 1 column (25%), Document Preview spans 2
+              (50%, unchanged from before this became a 3-column layout) -
+              grid's `minmax(0, 1fr)` tracks divide width precisely, which a
+              flex row's percentage-basis children can't do as cleanly
+              alongside `gap`. h-full min-h-0 on every column is a stretch
+              safety net on top of grid's own align-items:stretch default,
+              same defensive reasoning as the flex row this replaces: never
+              rely on a single implicit mechanism for "fill the row's
+              height" when an explicit one is one class away. */}
+          <main className="grid min-h-0 flex-1 grid-cols-4 gap-4 p-4">
+            <div className="col-span-1 flex h-full min-h-0 min-w-0 flex-col">
+              <StyleReportPanel
+                styleReport={unmergedStyleReport}
+                selectedIds={state.selectedVariantIds}
+                paragraphMarkers={paragraphMarkers}
+                onToggleSelect={actions.toggleSelectVariant}
+                onMergeSelected={() => actions.openMergeDialog()}
+                hasReferenceStyles={importedStyleCount > 0}
+                bulkMergeError={state.bulkMergeError}
+                onSelectMatchingReferenceStyles={actions.selectVariantsMatchingReferenceStyles}
+                onBulkMergeMatched={actions.bulkMergeMatchedToReference}
+                mergeProgress={mergeProgress}
+                onSave={actions.save}
+                onRipAnotherFile={actions.reset}
+              />
+            </div>
+            <div className="col-span-1 flex h-full min-h-0 min-w-0 flex-col">
+              <UserStylesPanel
+                userStyles={state.userStyles}
+                styleReport={state.styleReport}
+                paragraphMarkers={paragraphMarkers}
+                onEditStyle={actions.openMergeDialog}
+                onCreateNewStyle={() => actions.openMergeDialog()}
+                selectedTargetStyleId={state.selectedTargetStyleId}
+                onToggleSelectTarget={actions.toggleSelectTargetStyle}
+                pendingSelectionCount={state.selectedVariantIds.size}
+                onMergeSelectedIntoTarget={actions.mergeSelectedIntoTarget}
+                mergeError={state.mergeError}
+                referenceDoc={state.referenceDoc}
+                onAttachReferenceDoc={actions.loadReferenceDoc}
+                onRemoveReferenceDoc={actions.removeReferenceDoc}
+              />
+            </div>
+            <div className="col-span-2 flex h-full min-h-0 min-w-0 flex-col">
+              <DocumentPreviewPanel
+                parsedDocx={state.parsedDocx}
+                styleReport={state.styleReport}
+                selectedVariantIds={state.selectedVariantIds}
+                paragraphMarkers={paragraphMarkers}
+                referenceDoc={state.referenceDoc}
+                isMergingContent={state.isMergingContent}
+                onOpenContentMerge={actions.openContentMergeDialog}
+                isSaving={state.isSaving}
+                onSave={actions.save}
+              />
+            </div>
           </main>
 
           {state.mergeDialogOpen && (
@@ -87,8 +119,8 @@ function App() {
               userStyles={state.userStyles}
               reuseRecord={reuseRecord}
               error={state.mergeError}
-              onConfirm={(targetProps, name, targetStyleId) =>
-                actions.confirmMerge(targetProps, name, reuseRecord?.styleId ?? targetStyleId)
+              onConfirm={(targetProps, name, kind, listFormat, targetStyleId) =>
+                actions.confirmMerge(targetProps, name, kind, listFormat, reuseRecord?.styleId ?? targetStyleId)
               }
               onCancel={actions.closeModals}
             />

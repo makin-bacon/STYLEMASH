@@ -9,6 +9,7 @@ import type {
 } from '../../types/ooxml'
 import { NS } from './constants'
 import { wChildren } from './domUtils'
+import { buildParagraphMarkers } from './numbering'
 import { signatureToKey } from './signature'
 import {
   buildResolutionContext,
@@ -20,7 +21,10 @@ import { buildThemeColorMap } from './themeColor'
 
 const SAMPLE_TEXT_MAX_LENGTH = 80
 
-function getRunText(runEl: Element): string {
+/** Concatenates every `<w:t>` child's text content within a run - the same
+ * "visible text" extraction used to group/sample the Style Report, exported
+ * so consumers like DocumentPreviewPanel can render the same text runs. */
+export function getRunText(runEl: Element): string {
   let text = ''
   for (const t of wChildren(runEl, 't')) text += t.textContent ?? ''
   return text
@@ -43,11 +47,16 @@ interface EntityDraft {
 /** Walks every run in word/document.xml's body, resolves each one's
  * effective visual formatting, and groups them by that signature into the
  * Style Report - then further splits each group into variants by origin
- * (direct formatting vs. a specific named style), so text that reached the
- * same look via different paths stays independently selectable. Headers,
- * footers, and footnotes/endnotes are out of scope for v1 (they live in
- * separate zip parts we don't parse); runs with no visible text (e.g.
- * drawing-only or page-break-only runs) are skipped.
+ * (direct formatting vs. a specific named style) AND by list membership, so
+ * text that reached the same look via different paths - or that looks
+ * identical to a list item purely by coincidence (very common: list
+ * paragraphs frequently carry no character formatting of their own) - stays
+ * independently selectable, and each variant's sample/marker stays
+ * representative of every occurrence it actually contains rather than being
+ * silently outvoted by whichever text happened to appear first in the
+ * document. Headers, footers, and footnotes/endnotes are out of scope for
+ * v1 (they live in separate zip parts we don't parse); runs with no visible
+ * text (e.g. drawing-only or page-break-only runs) are skipped.
  *
  * Recomputed wholesale after every merge/edit rather than patched
  * incrementally - simpler, and cheap even for large documents. */
@@ -56,12 +65,14 @@ export function buildStyleReport(parsedDocx: ParsedDocx): StyleEntity[] {
   const docDefaultsRPr = getDocDefaultsRPr(parsedDocx.stylesXml)
   const themeColors = buildThemeColorMap(parsedDocx.themeXml)
   const ctx = buildResolutionContext(stylesMap, docDefaultsRPr, themeColors)
+  const paragraphMarkers = buildParagraphMarkers(parsedDocx)
 
   const drafts = new Map<string, EntityDraft>()
 
   const paragraphs = parsedDocx.documentXml.getElementsByTagNameNS(NS.w, 'p')
   for (let i = 0; i < paragraphs.length; i++) {
     const paragraphEl = paragraphs[i]
+    const isListItem = paragraphMarkers.has(paragraphEl)
     // Descendant (not direct-child) lookup so runs wrapped in w:hyperlink,
     // w:ins/w:del (tracked changes), or w:sdt content are picked up too,
     // without special-casing each wrapper element.
@@ -82,10 +93,11 @@ export function buildStyleReport(parsedDocx: ParsedDocx): StyleEntity[] {
       if (!draft.sampleText) draft.sampleText = truncate(text, SAMPLE_TEXT_MAX_LENGTH)
 
       const originKey = originToKey(origin)
-      let variant = draft.variants.get(originKey)
+      const variantKey = isListItem ? `${originKey}::list` : originKey
+      let variant = draft.variants.get(variantKey)
       if (!variant) {
-        variant = { id: `${sigKey}::${originKey}`, origin, occurrenceCount: 0, sampleText: '', runRefs: [] }
-        draft.variants.set(originKey, variant)
+        variant = { id: `${sigKey}::${variantKey}`, origin, occurrenceCount: 0, sampleText: '', runRefs: [] }
+        draft.variants.set(variantKey, variant)
       }
       variant.occurrenceCount += 1
       if (!variant.sampleText) variant.sampleText = truncate(text, SAMPLE_TEXT_MAX_LENGTH)
@@ -128,15 +140,25 @@ export function collectRunRefsForVariantIds(styleReport: StyleEntity[], variantI
   return refs
 }
 
+/** True for the two origin kinds that mean "this run/paragraph's look comes
+ * from a named style StyleMash could have created" - named-character (via
+ * mergeStyles()) or named-paragraph (via mergeParagraphStyle(), e.g. a
+ * bullet/numbered list style). Direct formatting never counts. */
+function isNamedStyleOrigin(origin: StyleOrigin): origin is Extract<StyleOrigin, { styleId: string }> {
+  return origin.kind === 'named-character' || origin.kind === 'named-paragraph'
+}
+
 /** Counts how many runs currently reference `styleId`, by re-scanning the
  * latest Style Report rather than hand-maintaining a running total on the
  * UserStyleRecord - keeps the "User-Created Styles" panel's occurrence
- * counts always in sync with the real document state. */
+ * counts always in sync with the real document state. Matches both
+ * character styles (w:rStyle) and paragraph styles (w:pStyle) - a
+ * UserStyleRecord can be either kind (see UserStyleRecord.kind). */
 export function countOccurrencesForStyleId(styleReport: StyleEntity[], styleId: string): number {
   let total = 0
   for (const entity of styleReport) {
     for (const variant of entity.variants) {
-      if (variant.origin.kind === 'named-character' && variant.origin.styleId === styleId) {
+      if (isNamedStyleOrigin(variant.origin) && variant.origin.styleId === styleId) {
         total += variant.occurrenceCount
       }
     }
@@ -148,9 +170,9 @@ export function countOccurrencesForStyleId(styleReport: StyleEntity[], styleId: 
  * document currently is - drives the Style Report's progress bar. Counted
  * at the variant level (the same granularity as selection/merging itself):
  * a variant counts as "merged" once its look is controlled by a named
- * character style that's tracked as a UserStyleRecord; every other variant
- * (direct formatting, or still under one of the document's own original
- * named styles) counts as remaining. */
+ * style (character or paragraph) that's tracked as a UserStyleRecord; every
+ * other variant (direct formatting, or still under one of the document's
+ * own original named styles) counts as remaining. */
 export function computeMergeProgress(
   styleReport: StyleEntity[],
   userStyles: UserStyleRecord[],
@@ -161,10 +183,39 @@ export function computeMergeProgress(
   for (const entity of styleReport) {
     for (const variant of entity.variants) {
       total += 1
-      if (variant.origin.kind === 'named-character' && userStyleIds.has(variant.origin.styleId)) {
+      if (isNamedStyleOrigin(variant.origin) && userStyleIds.has(variant.origin.styleId)) {
         merged += 1
       }
     }
   }
   return { total, merged, remaining: total - merged }
+}
+
+/** The Style Report entries actually worth showing in StyleReportPanel:
+ * variants already merged into a tracked UserStyleRecord (the same
+ * "merged" test computeMergeProgress uses) are dropped - once an
+ * occurrence's look is controlled by a User-Created style, re-selecting it
+ * in the report would be a no-op (it's already exactly that style's look),
+ * so leaving it visible is just clutter once the whole point of merging is
+ * done. An entity left with zero variants is dropped entirely; one with
+ * some-but-not-all variants merged gets a recomputed occurrenceCount so the
+ * "N total across M sources" text stays consistent with what's still shown
+ * (entities/variant arrays are returned as-is, unfiltered, when nothing
+ * about them needed to change - avoids reallocating the common case). */
+export function filterUnmergedEntities(styleReport: StyleEntity[], userStyles: UserStyleRecord[]): StyleEntity[] {
+  const userStyleIds = new Set(userStyles.map((r) => r.styleId))
+  const result: StyleEntity[] = []
+  for (const entity of styleReport) {
+    const variants = entity.variants.filter(
+      (v) => !(isNamedStyleOrigin(v.origin) && userStyleIds.has(v.origin.styleId)),
+    )
+    if (variants.length === 0) continue
+    if (variants.length === entity.variants.length) {
+      result.push(entity)
+    } else {
+      const occurrenceCount = variants.reduce((sum, v) => sum + v.occurrenceCount, 0)
+      result.push({ ...entity, variants, occurrenceCount })
+    }
+  }
+  return result
 }

@@ -33,7 +33,6 @@ function renderRow(props: Partial<Parameters<typeof StyleVariantRow>[0]> = {}) {
   document.body.appendChild(container)
   const root = createRoot(container)
   const onToggleSelect = vi.fn()
-  const onEditXml = vi.fn()
 
   act(() => {
     root.render(
@@ -42,13 +41,12 @@ function renderRow(props: Partial<Parameters<typeof StyleVariantRow>[0]> = {}) {
         variant={VARIANT}
         selected={false}
         onToggleSelect={onToggleSelect}
-        onEditXml={onEditXml}
         {...props}
       />,
     )
   })
 
-  return { container, onToggleSelect, onEditXml, root }
+  return { container, onToggleSelect, root }
 }
 
 describe('StyleVariantRow interaction', () => {
@@ -61,20 +59,6 @@ describe('StyleVariantRow interaction', () => {
     })
 
     expect(onToggleSelect).toHaveBeenCalledTimes(1)
-  })
-
-  it('clicking "Edit XML" fires onEditXml but does not also toggle selection', () => {
-    const { container, onToggleSelect, onEditXml } = renderRow()
-    const editButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Edit XML',
-    )!
-
-    act(() => {
-      editButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-
-    expect(onEditXml).toHaveBeenCalledTimes(1)
-    expect(onToggleSelect).not.toHaveBeenCalled()
   })
 
   it('clicking the (visually hidden) checkbox toggles selection exactly once, not twice', () => {

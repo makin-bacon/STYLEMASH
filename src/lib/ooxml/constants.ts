@@ -4,6 +4,11 @@ export const NS = {
   // DrawingML "main" namespace - only used to read theme1.xml's <a:clrScheme>
   // when resolving w:themeColor references.
   a: 'http://schemas.openxmlformats.org/drawingml/2006/main',
+  // OPC package-level namespaces - only used by serializeDocx.ts to register
+  // a brand-new word/numbering.xml part (see ensureNumberingPartRegistered),
+  // never touched when a document already ships one of its own.
+  contentTypes: 'http://schemas.openxmlformats.org/package/2006/content-types',
+  relationships: 'http://schemas.openxmlformats.org/package/2006/relationships',
 } as const
 
 // The zip paths we read/write. Headers, footers, and footnotes/endnotes are
@@ -12,9 +17,12 @@ export const DOCX_PATHS = {
   document: 'word/document.xml',
   styles: 'word/styles.xml',
   theme: 'word/theme/theme1.xml',
+  numbering: 'word/numbering.xml',
+  contentTypes: '[Content_Types].xml',
+  documentRels: 'word/_rels/document.xml.rels',
 } as const
 
-// Local (unprefixed) names of the <w:rPr> children StyleRipper fully owns:
+// Local (unprefixed) names of the <w:rPr> children StyleMash fully owns:
 // the Style Report groups text by these, and a merge fully subsumes them
 // (creates a style that sets all of them, then strips them from the runs
 // it applies to). Everything else on a run's <w:rPr> is left untouched.

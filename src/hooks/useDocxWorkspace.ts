@@ -1,12 +1,19 @@
 import { useCallback, useMemo, useReducer } from 'react'
-import type { FormattingSignature, ParsedDocx, StyleEntity, UserStyleRecord } from '../types/ooxml'
+import type {
+  FormattingSignature,
+  ListFormat,
+  ParsedDocx,
+  StyleEntity,
+  UserStyleKind,
+  UserStyleRecord,
+} from '../types/ooxml'
 import { downloadBlob } from '../lib/download'
 import {
   bulkMergeVariantsIntoMatchingReferenceStyles,
   findVariantIdsMatchingReferenceStyleNames,
 } from '../lib/ooxml/bulkMergeMatchedStyles'
 import { buildContentMergedDocx, type ContentMergeOptions } from '../lib/ooxml/contentMerge'
-import { mergeStyles } from '../lib/ooxml/mergeStyles'
+import { mergeParagraphStyle, mergeStyles } from '../lib/ooxml/mergeStyles'
 import { parseDocx } from '../lib/ooxml/parseDocx'
 import {
   materializeReferenceDocStyles,
@@ -98,6 +105,8 @@ type Action =
       type: 'CONFIRM_MERGE'
       targetProps: FormattingSignature
       name: string
+      kind: UserStyleKind
+      listFormat: ListFormat
       reuseExistingStyleId?: string
     }
   | { type: 'OPEN_XML_EDITOR'; variantId: string }
@@ -181,20 +190,38 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
       const sourceRunRefs = collectRunRefsForVariantIds(state.styleReport, state.selectedVariantIds)
 
       try {
-        const styleId = mergeStyles(
-          state.parsedDocx,
-          sourceRunRefs,
-          action.targetProps,
-          action.name,
-          action.reuseExistingStyleId,
-        )
+        const styleId =
+          action.kind === 'paragraph'
+            ? mergeParagraphStyle(
+                state.parsedDocx,
+                sourceRunRefs,
+                action.targetProps,
+                action.name,
+                action.listFormat,
+                action.reuseExistingStyleId,
+              )
+            : mergeStyles(
+                state.parsedDocx,
+                sourceRunRefs,
+                action.targetProps,
+                action.name,
+                action.reuseExistingStyleId,
+              )
         const styleReport = buildStyleReport(state.parsedDocx)
 
         const existingIndex = state.userStyles.findIndex((r) => r.styleId === styleId)
+        const listFormat = action.kind === 'paragraph' ? action.listFormat : 'none'
         const record: UserStyleRecord = {
           styleId,
           name: action.name,
           targetSignature: action.targetProps,
+          kind: action.kind,
+          listFormat,
+          // Manually-created lists are always single-level (createListNumId
+          // only ever creates one), so this is just the ilvl-0 marker - the
+          // richer multilevel preview (e.g. "1.1.") is exclusive to styles
+          // materialized from Document B (see referenceDocStyles.ts).
+          listPreviewText: listFormat === 'bullet' ? '•' : listFormat === 'decimal' ? '1.' : undefined,
           createdAt: existingIndex === -1 ? Date.now() : state.userStyles[existingIndex].createdAt,
         }
         const userStyles =
@@ -343,13 +370,24 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
 
       const sourceRunRefs = collectRunRefsForVariantIds(state.styleReport, state.selectedVariantIds)
       try {
-        mergeStyles(
-          state.parsedDocx,
-          sourceRunRefs,
-          targetRecord.targetSignature,
-          targetRecord.name,
-          targetRecord.styleId,
-        )
+        if (targetRecord.kind === 'paragraph') {
+          mergeParagraphStyle(
+            state.parsedDocx,
+            sourceRunRefs,
+            targetRecord.targetSignature,
+            targetRecord.name,
+            targetRecord.listFormat,
+            targetRecord.styleId,
+          )
+        } else {
+          mergeStyles(
+            state.parsedDocx,
+            sourceRunRefs,
+            targetRecord.targetSignature,
+            targetRecord.name,
+            targetRecord.styleId,
+          )
+        }
         const styleReport = buildStyleReport(state.parsedDocx)
         return {
           ...state,
@@ -369,7 +407,7 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
   }
 }
 
-/** Owns the entire StyleRipper workspace: the parsed document, the derived
+/** Owns the entire StyleMash workspace: the parsed document, the derived
  * Style Report, user-created (merged) styles, and all selection/modal UI
  * state. A single reducer (rather than several useStates) because a merge
  * is one atomic transaction that must update selection, the report, and the
@@ -402,8 +440,14 @@ export function useDocxWorkspace() {
   const closeModals = useCallback(() => dispatch({ type: 'CLOSE_MODALS' }), [])
 
   const confirmMerge = useCallback(
-    (targetProps: FormattingSignature, name: string, reuseExistingStyleId?: string) => {
-      dispatch({ type: 'CONFIRM_MERGE', targetProps, name, reuseExistingStyleId })
+    (
+      targetProps: FormattingSignature,
+      name: string,
+      kind: UserStyleKind,
+      listFormat: ListFormat,
+      reuseExistingStyleId?: string,
+    ) => {
+      dispatch({ type: 'CONFIRM_MERGE', targetProps, name, kind, listFormat, reuseExistingStyleId })
     },
     [],
   )
@@ -483,7 +527,7 @@ export function useDocxWorkspace() {
   }, [])
 
   /** Returns to the landing screen in-app (no browser reload) - used by
-   * AppHeader's "Rip a different file" button, so the persistent
+   * StyleReportPanel's "Mash a different file" button, so the persistent
    * header/footer never flicker/remount along the way. */
   const reset = useCallback(() => dispatch({ type: 'RESET' }), [])
 

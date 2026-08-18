@@ -26,6 +26,7 @@ export function buildStylesMap(stylesXml: XMLDocument): Map<string, StyleDef> {
       name: wAttr(wChild(styleEl, 'name'), 'val') ?? id,
       basedOnId: wAttr(wChild(styleEl, 'basedOn'), 'val'),
       rPrElement: wChild(styleEl, 'rPr'),
+      pPrElement: wChild(styleEl, 'pPr'),
       isDefault: wAttr(styleEl, 'default') === '1' || wAttr(styleEl, 'default') === 'true',
     })
   }

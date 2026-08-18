@@ -1,6 +1,21 @@
 import { useState } from 'react'
-import type { FormattingSignature, UserStyleRecord } from '../types/ooxml'
+import type { FormattingSignature, ListFormat, UserStyleKind, UserStyleRecord } from '../types/ooxml'
 import { signatureToCss } from '../lib/signatureToCss'
+
+const LIST_FORMAT_OPTIONS: { value: ListFormat; label: string }[] = [
+  { value: 'none', label: 'No list (plain paragraph style)' },
+  { value: 'bullet', label: 'Bulleted list' },
+  { value: 'decimal', label: 'Numbered list' },
+]
+
+/** Rough preview marker for the chosen list format - not a real resolved
+ * ParagraphMarker (there's no document yet to resolve one against), just
+ * enough to show the shape of what merging will produce. */
+function previewMarkerText(listFormat: ListFormat): string {
+  if (listFormat === 'bullet') return '•'
+  if (listFormat === 'decimal') return '1.'
+  return ''
+}
 
 const DEFAULT_SIGNATURE: FormattingSignature = {
   fontFamily: 'Calibri',
@@ -52,7 +67,13 @@ interface MergeDialogProps {
    * to redefining this one specific style (no target dropdown). */
   reuseRecord: UserStyleRecord | null
   error: string | null
-  onConfirm: (targetProps: FormattingSignature, name: string, targetStyleId?: string) => void
+  onConfirm: (
+    targetProps: FormattingSignature,
+    name: string,
+    kind: UserStyleKind,
+    listFormat: ListFormat,
+    targetStyleId?: string,
+  ) => void
   onCancel: () => void
 }
 
@@ -79,6 +100,14 @@ export function MergeDialog({
   const baseline = reuseRecord?.targetSignature ?? baselineSignature ?? DEFAULT_SIGNATURE
   const [name, setName] = useState(reuseRecord?.name ?? 'Custom Style')
   const [fields, setFields] = useState(fieldsFromSignature(baseline))
+  const [kind, setKind] = useState<UserStyleKind>(reuseRecord?.kind ?? 'character')
+  const [listFormat, setListFormat] = useState<ListFormat>(reuseRecord?.listFormat ?? 'none')
+
+  // Once a fresh selection is pointed at an existing style via the dropdown,
+  // its kind/list format aren't independently editable here - they're a
+  // property of that style, not of this merge. (The "Edit" flow, driven by
+  // reuseRecord instead, is the one place a style's own kind can change.)
+  const typeControlsLocked = !reuseRecord && targetStyleId !== ''
 
   const handleTargetChange = (id: string) => {
     setTargetStyleId(id)
@@ -86,6 +115,8 @@ export function MergeDialog({
     if (record) {
       setName(record.name)
       setFields(fieldsFromSignature(record.targetSignature))
+      setKind(record.kind)
+      setListFormat(record.listFormat)
     }
   }
 
@@ -102,7 +133,13 @@ export function MergeDialog({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) return
-    onConfirm(draftSignature, name.trim(), reuseRecord?.styleId ?? targetStyleId ?? undefined)
+    onConfirm(
+      draftSignature,
+      name.trim(),
+      kind,
+      kind === 'paragraph' ? listFormat : 'none',
+      reuseRecord?.styleId ?? targetStyleId ?? undefined,
+    )
   }
 
   const heading = reuseRecord
@@ -143,6 +180,55 @@ export function MergeDialog({
                   <option key={record.styleId} value={record.styleId}>
                     {record.name}
                     {record.fromReferenceDoc ? ' (Document B)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <div className="space-y-1.5">
+            <span className="block text-sm text-slate-600">Style type</span>
+            <div className="flex gap-4 text-sm text-slate-700">
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="style-kind"
+                  checked={kind === 'character'}
+                  disabled={typeControlsLocked}
+                  onChange={() => {
+                    setKind('character')
+                    setListFormat('none')
+                  }}
+                  className="accent-indigo-600"
+                />
+                Character (text formatting)
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="style-kind"
+                  checked={kind === 'paragraph'}
+                  disabled={typeControlsLocked}
+                  onChange={() => setKind('paragraph')}
+                  className="accent-indigo-600"
+                />
+                Paragraph (list, etc.)
+              </label>
+            </div>
+          </div>
+
+          {kind === 'paragraph' && (
+            <label className="block text-sm">
+              <span className="text-slate-600">List format</span>
+              <select
+                value={listFormat}
+                disabled={typeControlsLocked}
+                onChange={(e) => setListFormat(e.target.value as ListFormat)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
+              >
+                {LIST_FORMAT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
                   </option>
                 ))}
               </select>
@@ -249,7 +335,12 @@ export function MergeDialog({
 
           <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
             <p className="text-xs text-slate-400">Preview</p>
-            <p style={signatureToCss(draftSignature)}>The quick brown fox jumps over the lazy dog</p>
+            <p style={signatureToCss(draftSignature)}>
+              {kind === 'paragraph' && listFormat !== 'none' && (
+                <span className="mr-1 text-slate-500">{previewMarkerText(listFormat)}</span>
+              )}
+              The quick brown fox jumps over the lazy dog
+            </p>
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}

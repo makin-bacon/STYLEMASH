@@ -1,8 +1,8 @@
 {
-  "name": "styleripper",
+  "name": "stylemash",
   "description": "Local-only browser tool for standardizing text formatting in Word documents.",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "engines": {
     "node": "^18.0.0 || ^20.0.0 || >=22.0.0"
@@ -15,6 +15,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.3.1",
+    "@fortawesome/free-regular-svg-icons": "^7.3.1",
+    "@fortawesome/react-fontawesome": "^3.5.0",
     "jszip": "^3.10.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
