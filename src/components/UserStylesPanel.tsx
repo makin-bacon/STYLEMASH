@@ -108,7 +108,7 @@ export function UserStylesPanel({
         <div>
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-200">
             New Styles <span className="font-normal text-slate-400">({userStyles.length})</span>
-            <InfoTooltip text="Select entries in the Style Report, then click a style here to merge them. To generate styles, hit the &quot;+ New Style&quot; button or upload a reference document." />
+            <InfoTooltip text="Select entries in the Old Styles list, then click a style here to merge them. To generate styles, hit the &quot;+ New Style&quot; button, upload a reference document or you can auto populate the list with some sensible styles to get you started." />
           </h2>
         </div>
         <div className="flex shrink-0 items-center gap-2">
