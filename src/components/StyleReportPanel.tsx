@@ -69,15 +69,15 @@ export function StyleReportPanel({
   const allMatched = mergeProgress.total > 0 && mergeProgress.remaining === 0
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-200 px-4 py-4">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+      <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-800 px-4 py-4">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-200">
           Style Report <span className="font-normal text-slate-400">({styleReport.length})</span>
           <InfoTooltip text="Select items from this list and you'll see them in your document. Now either merge these with a newly created style or one from an uploaded reference Word file in the &quot;User-created&quot; styles list." />
         </h2>
         <button
           type="button"
           onClick={onRipAnotherFile}
-          className="shrink-0 rounded-md border border-slate-400 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-300"
+          className="shrink-0 rounded-md border border-indigo-200 px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-600"
         >
           Mash a different file
         </button>
@@ -210,7 +210,7 @@ export function StyleReportPanel({
           onClick={onMergeSelected}
           className="w-full rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white enabled:hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          Do it {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
+          Mash it {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
         </button>
       </div>
     </div>
