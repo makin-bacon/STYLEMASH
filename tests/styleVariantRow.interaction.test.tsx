@@ -80,6 +80,6 @@ describe('StyleVariantRow interaction', () => {
   it('reflects selected state via the row background, not just the checkbox', () => {
     const { container } = renderRow({ selected: true })
     const li = container.querySelector('li')!
-    expect(li.className).toContain('bg-indigo-50')
+    expect(li.className).toContain('bg-indigo-200')
   })
 })

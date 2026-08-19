@@ -13,15 +13,68 @@ import {
   findVariantIdsMatchingReferenceStyleNames,
 } from '../lib/ooxml/bulkMergeMatchedStyles'
 import { buildContentMergedDocx, type ContentMergeOptions } from '../lib/ooxml/contentMerge'
-import { mergeParagraphStyle, mergeStyles } from '../lib/ooxml/mergeStyles'
+import { addDefaultStyles } from '../lib/ooxml/defaultStyles'
+import { mergeParagraphStyle, mergeStyles, removeStyleById } from '../lib/ooxml/mergeStyles'
 import { parseDocx } from '../lib/ooxml/parseDocx'
 import {
   materializeReferenceDocStyles,
   reconcileUserStylesOnReferenceDocRemoval,
 } from '../lib/ooxml/referenceDocStyles'
-import { serializeDocx } from '../lib/ooxml/serializeDocx'
+import { serializeDocx, serializePart } from '../lib/ooxml/serializeDocx'
 import { buildStyleReport, collectRunRefsForVariantIds, findVariantById } from '../lib/ooxml/styleReport'
 import { applyXmlFragmentToRunRefs } from '../lib/ooxml/xmlFragmentEdit'
+
+/** A pre-mutation snapshot of everything a merge (or a full "Clear list")
+ * touches, pushed onto WorkspaceState.undoStack right before the mutating
+ * call - documentXml/stylesXml/numberingXml are mutated in place (see the
+ * reducer's top-of-file note), so the only way to snapshot them is to
+ * serialize to text and re-parse on restore, rather than keeping a second
+ * live reference to the same, about-to-be-mutated Elements. */
+interface UndoSnapshot {
+  documentXml: string
+  stylesXml: string
+  numberingXml: string | null
+  userStyles: UserStyleRecord[]
+}
+
+/** Keyed by the exact `parsedDocx` object a snapshot was taken from, so a
+ * second call for the *same* pre-dispatch state (React 18 StrictMode
+ * deliberately invokes a reducer twice per dispatch in dev, to surface
+ * impure reducers - see the top-of-file note on this one's mutate-in-place
+ * escape hatch) returns the pristine snapshot captured on the first call
+ * instead of re-serializing documentXml/stylesXml *after* that first call's
+ * mergeStyles()/etc. already mutated them. Both invocations receive the
+ * identical `state` object from React, so `state.parsedDocx` is the same
+ * reference either way - only the live Elements inside it have (or haven't
+ * yet) been mutated. Entries fall out of the map for GC on their own, since
+ * every mutating action replaces `parsedDocx` with a new wrapper object
+ * afterward. */
+const pristineSnapshotCache = new WeakMap<ParsedDocx, UndoSnapshot>()
+
+function snapshotForUndo(parsedDocx: ParsedDocx, userStyles: UserStyleRecord[]): UndoSnapshot {
+  const cached = pristineSnapshotCache.get(parsedDocx)
+  if (cached) return cached
+  const snapshot: UndoSnapshot = {
+    documentXml: serializePart(parsedDocx.documentXml),
+    stylesXml: serializePart(parsedDocx.stylesXml),
+    numberingXml: parsedDocx.numberingXml ? serializePart(parsedDocx.numberingXml) : null,
+    userStyles,
+  }
+  pristineSnapshotCache.set(parsedDocx, snapshot)
+  return snapshot
+}
+
+function restoreSnapshot(parsedDocx: ParsedDocx, snapshot: UndoSnapshot): ParsedDocx {
+  const parser = new DOMParser()
+  return {
+    ...parsedDocx,
+    documentXml: parser.parseFromString(snapshot.documentXml, 'application/xml'),
+    stylesXml: parser.parseFromString(snapshot.stylesXml, 'application/xml'),
+    numberingXml: snapshot.numberingXml
+      ? parser.parseFromString(snapshot.numberingXml, 'application/xml')
+      : null,
+  }
+}
 
 export interface ReferenceDocState {
   status: 'empty' | 'loading' | 'loaded' | 'error'
@@ -70,6 +123,12 @@ export interface WorkspaceState {
    * near the Style Report's bulk-merge control rather than in a modal,
    * since that action has no modal of its own. */
   bulkMergeError: string | null
+  /** One entry per undoable action (CONFIRM_MERGE, MERGE_SELECTED_INTO_TARGET,
+   * BULK_MERGE_MATCHED_TO_REFERENCE, CLEAR_USER_STYLES), oldest first - UNDO
+   * pops the last one and restores it. Deliberately doesn't cover style-only
+   * actions with no document effect until merged into (ADD_DEFAULT_STYLES,
+   * attaching/removing Document B) - see snapshotForUndo's call sites. */
+  undoStack: UndoSnapshot[]
 }
 
 const initialState: WorkspaceState = {
@@ -91,6 +150,7 @@ const initialState: WorkspaceState = {
   isMergingContent: false,
   contentMergeError: null,
   bulkMergeError: null,
+  undoStack: [],
 }
 
 type Action =
@@ -126,6 +186,9 @@ type Action =
   | { type: 'RESET' }
   | { type: 'TOGGLE_SELECT_TARGET_STYLE'; styleId: string }
   | { type: 'MERGE_SELECTED_INTO_TARGET' }
+  | { type: 'ADD_DEFAULT_STYLES' }
+  | { type: 'CLEAR_USER_STYLES' }
+  | { type: 'UNDO' }
 
 /** Note on the reducer's relationship to immutability: `parsedDocx`'s inner
  * XMLDocuments (documentXml/stylesXml) are mutated in place by mergeStyles()
@@ -188,6 +251,7 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
       // style's look" (no newly-selected variants to fold in) both work -
       // mergeStyles() just creates/redefines the style definition itself.
       const sourceRunRefs = collectRunRefsForVariantIds(state.styleReport, state.selectedVariantIds)
+      const undoSnapshot = snapshotForUndo(state.parsedDocx, state.userStyles)
 
       try {
         const styleId =
@@ -239,6 +303,7 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
           mergeDialogOpen: false,
           mergeDialogReuseStyleId: null,
           mergeError: null,
+          undoStack: [...state.undoStack, undoSnapshot],
         }
       } catch (err) {
         return { ...state, mergeError: err instanceof Error ? err.message : 'Merge failed.' }
@@ -343,6 +408,7 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
 
     case 'BULK_MERGE_MATCHED_TO_REFERENCE': {
       if (!state.parsedDocx) return state
+      const undoSnapshot = snapshotForUndo(state.parsedDocx, state.userStyles)
       try {
         bulkMergeVariantsIntoMatchingReferenceStyles(
           state.parsedDocx,
@@ -357,6 +423,7 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
           styleReport,
           selectedVariantIds: new Set(),
           bulkMergeError: null,
+          undoStack: [...state.undoStack, undoSnapshot],
         }
       } catch (err) {
         return { ...state, bulkMergeError: err instanceof Error ? err.message : 'Bulk merge failed.' }
@@ -378,6 +445,7 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
       if (!targetRecord) return state
 
       const sourceRunRefs = collectRunRefsForVariantIds(state.styleReport, state.selectedVariantIds)
+      const undoSnapshot = snapshotForUndo(state.parsedDocx, state.userStyles)
       try {
         if (targetRecord.kind === 'paragraph') {
           mergeParagraphStyle(
@@ -405,9 +473,58 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
           selectedVariantIds: new Set(),
           selectedTargetStyleId: null,
           mergeError: null,
+          undoStack: [...state.undoStack, undoSnapshot],
         }
       } catch (err) {
         return { ...state, mergeError: err instanceof Error ? err.message : 'Merge failed.' }
+      }
+    }
+
+    case 'ADD_DEFAULT_STYLES': {
+      if (!state.parsedDocx) return state
+      const userStyles = addDefaultStyles(state.parsedDocx, state.userStyles)
+      return {
+        ...state,
+        parsedDocx: { ...state.parsedDocx },
+        userStyles,
+        // A name collision with an existing style redefines its rPr/pPr in
+        // place (see addDefaultStyles) - same reasoning as REFERENCE_DOC_LOADED
+        // for recomputing this: any run already merged into that style needs
+        // its signature refreshed to match the newest look.
+        styleReport: buildStyleReport(state.parsedDocx),
+      }
+    }
+
+    case 'CLEAR_USER_STYLES': {
+      if (!state.parsedDocx || state.userStyles.length === 0) return state
+      const undoSnapshot = snapshotForUndo(state.parsedDocx, state.userStyles)
+      for (const record of state.userStyles) {
+        removeStyleById(state.parsedDocx.stylesXml, record.styleId)
+      }
+      return {
+        ...state,
+        parsedDocx: { ...state.parsedDocx },
+        styleReport: buildStyleReport(state.parsedDocx),
+        userStyles: [],
+        selectedTargetStyleId: null,
+        undoStack: [...state.undoStack, undoSnapshot],
+      }
+    }
+
+    case 'UNDO': {
+      if (!state.parsedDocx || state.undoStack.length === 0) return state
+      const snapshot = state.undoStack[state.undoStack.length - 1]
+      const parsedDocx = restoreSnapshot(state.parsedDocx, snapshot)
+      return {
+        ...state,
+        parsedDocx,
+        styleReport: buildStyleReport(parsedDocx),
+        userStyles: snapshot.userStyles,
+        undoStack: state.undoStack.slice(0, -1),
+        selectedVariantIds: new Set(),
+        selectedTargetStyleId: null,
+        mergeError: null,
+        bulkMergeError: null,
       }
     }
 
@@ -546,6 +663,10 @@ export function useDocxWorkspace() {
 
   const mergeSelectedIntoTarget = useCallback(() => dispatch({ type: 'MERGE_SELECTED_INTO_TARGET' }), [])
 
+  const addDefaultStylesAction = useCallback(() => dispatch({ type: 'ADD_DEFAULT_STYLES' }), [])
+  const clearUserStyles = useCallback(() => dispatch({ type: 'CLEAR_USER_STYLES' }), [])
+  const undo = useCallback(() => dispatch({ type: 'UNDO' }), [])
+
   // Summary of the current selection, for MergeDialog's prefill/messaging -
   // exposed as derived totals rather than raw entities/variants so the
   // dialog stays decoupled from the report's grouping shape.
@@ -591,6 +712,9 @@ export function useDocxWorkspace() {
       reset,
       toggleSelectTargetStyle,
       mergeSelectedIntoTarget,
+      addDefaultStyles: addDefaultStylesAction,
+      clearUserStyles,
+      undo,
     },
   }
 }

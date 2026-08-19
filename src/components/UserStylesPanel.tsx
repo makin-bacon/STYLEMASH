@@ -44,6 +44,11 @@ interface UserStylesPanelProps {
   paragraphMarkers: Map<Element, ParagraphMarker>
   onEditStyle: (styleId: string) => void
   onCreateNewStyle: () => void
+  /** Populates the list with StyleMash's bundled starter style set (see
+   * defaultStyles.ts) - a name collision with an existing style redefines
+   * its look rather than duplicating it. User-initiated only; never runs
+   * automatically. */
+  onAddDefaultStyles: () => void
   /** The single style currently picked as a merge target (row click, not
    * "Edit") - null when none is. */
   selectedTargetStyleId: string | null
@@ -61,6 +66,10 @@ interface UserStylesPanelProps {
   referenceDoc: ReferenceDocState
   onAttachReferenceDoc: (file: File) => void
   onRemoveReferenceDoc: () => void
+  /** Wipes every User-Created style (record + <w:style> definition) in one
+   * go. Pushes its own undo snapshot (see useDocxWorkspace), so an accidental
+   * click is recoverable via the Undo button. */
+  onClearUserStyles: () => void
 }
 
 /** Right-hand panel: the named styles StyleMash has created via merges
@@ -82,6 +91,7 @@ export function UserStylesPanel({
   paragraphMarkers,
   onEditStyle,
   onCreateNewStyle,
+  onAddDefaultStyles,
   selectedTargetStyleId,
   onToggleSelectTarget,
   pendingSelectionCount,
@@ -90,23 +100,33 @@ export function UserStylesPanel({
   referenceDoc,
   onAttachReferenceDoc,
   onRemoveReferenceDoc,
+  onClearUserStyles,
 }: UserStylesPanelProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
       <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-800 px-4 py-4">
         <div>
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-200">
-            User-Created Styles <span className="font-normal text-slate-400">({userStyles.length})</span>
+            New Styles <span className="font-normal text-slate-400">({userStyles.length})</span>
             <InfoTooltip text="Select entries in the Style Report, then click a style here to merge them. To generate styles, hit the &quot;+ New Style&quot; button or upload a reference document." />
           </h2>
         </div>
-        <button
-          type="button"
-          onClick={onCreateNewStyle}
-          className="shrink-0 rounded-md border border-indigo-200 px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-600"
-        >
-          + New Style
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onAddDefaultStyles}
+            className="rounded-md border border-indigo-200 px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-600"
+          >
+            + Defaults
+          </button>
+          <button
+            type="button"
+            onClick={onCreateNewStyle}
+            className="rounded-md border border-indigo-200 px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-600"
+          >
+            + New Style
+          </button>
+        </div>
       </div>
 
       <ul className="min-h-0 flex-1 overflow-y-auto">
@@ -129,7 +149,7 @@ export function UserStylesPanel({
               onClick={() => onToggleSelectTarget(record.styleId)}
               className={`flex cursor-pointer items-start gap-3 border-b border-l-4 border-slate-200 px-4 py-3 transition-colors last:border-b-0 ${
                 isTarget
-                  ? 'border-l-indigo-500 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200'
+                  ? 'border-l-indigo-500 bg-indigo-200 hover:bg-indigo-300 active:bg-indigo-400'
                   : 'border-l-transparent hover:border-l-indigo-300 hover:bg-slate-50 active:bg-slate-100'
               }`}
             >
@@ -189,23 +209,35 @@ export function UserStylesPanel({
 
       {/* Always rendered (never conditionally mounted) so this row's height
           never changes as Document B is attached/removed - same reasoning
-          as DocumentPreviewPanel's own footer row. */}
-      <div className="border-t border-slate-200 px-4 py-2">
-        {referenceDoc.status === 'loaded' ? (
-          <button
-            type="button"
-            onClick={onRemoveReferenceDoc}
-            className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          >
-            Remove Document B
-          </button>
-        ) : (
-          <AttachReferenceDocButton
-            status={referenceDoc.status}
-            errorMessage={referenceDoc.errorMessage}
-            onAttach={onAttachReferenceDoc}
-          />
-        )}
+          as DocumentPreviewPanel's own footer row. "Clear list" always
+          occupies the left half; the right half still swaps between
+          Attach/Remove Document B depending on referenceDoc.status. */}
+      <div className="flex gap-2 border-t border-slate-200 px-4 py-2">
+        <button
+          type="button"
+          disabled={userStyles.length === 0}
+          onClick={onClearUserStyles}
+          className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+        >
+          Clear list
+        </button>
+        <div className="flex-1">
+          {referenceDoc.status === 'loaded' ? (
+            <button
+              type="button"
+              onClick={onRemoveReferenceDoc}
+              className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Remove Document B
+            </button>
+          ) : (
+            <AttachReferenceDocButton
+              status={referenceDoc.status}
+              errorMessage={referenceDoc.errorMessage}
+              onAttach={onAttachReferenceDoc}
+            />
+          )}
+        </div>
       </div>
     </div>
   )

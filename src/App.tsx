@@ -86,6 +86,7 @@ function App() {
                 paragraphMarkers={paragraphMarkers}
                 onEditStyle={actions.openMergeDialog}
                 onCreateNewStyle={() => actions.openMergeDialog()}
+                onAddDefaultStyles={actions.addDefaultStyles}
                 selectedTargetStyleId={state.selectedTargetStyleId}
                 onToggleSelectTarget={actions.toggleSelectTargetStyle}
                 pendingSelectionCount={state.selectedVariantIds.size}
@@ -94,6 +95,7 @@ function App() {
                 referenceDoc={state.referenceDoc}
                 onAttachReferenceDoc={actions.loadReferenceDoc}
                 onRemoveReferenceDoc={actions.removeReferenceDoc}
+                onClearUserStyles={actions.clearUserStyles}
               />
             </div>
             <div className="col-span-2 flex h-full min-h-0 min-w-0 flex-col">
@@ -107,6 +109,8 @@ function App() {
                 onOpenContentMerge={actions.openContentMergeDialog}
                 isSaving={state.isSaving}
                 onSave={actions.save}
+                canUndo={state.undoStack.length > 0}
+                onUndo={actions.undo}
               />
             </div>
           </main>

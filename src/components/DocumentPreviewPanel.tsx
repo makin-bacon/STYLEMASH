@@ -8,6 +8,7 @@ import { collectRunRefsForVariantIds, getRunText } from '../lib/ooxml/styleRepor
 import { signatureToCss } from '../lib/signatureToCss'
 import { InfoTooltip } from './InfoTooltip'
 import { SaveButton } from './SaveButton'
+import { UndoButton } from './UndoButton'
 
 interface DocumentPreviewPanelProps {
   parsedDocx: ParsedDocx | null
@@ -28,6 +29,9 @@ interface DocumentPreviewPanelProps {
   onOpenContentMerge: () => void
   isSaving: boolean
   onSave: () => void
+  /** Drives the header's Undo button - see useDocxWorkspace's undoStack. */
+  canUndo: boolean
+  onUndo: () => void
 }
 
 interface PreviewRun {
@@ -85,6 +89,8 @@ export function DocumentPreviewPanel({
   onOpenContentMerge,
   isSaving,
   onSave,
+  canUndo,
+  onUndo,
 }: DocumentPreviewPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const runNodesRef = useRef(new Map<Element, HTMLElement>())
@@ -181,7 +187,10 @@ export function DocumentPreviewPanel({
             text={`${parsedDocx?.originalFilename ?? 'Live preview'} — This is a "style only" preview of your document. It will not display your page flow correctly but that's OK, that's not what this tool is for. To merge your style with approved styles, use the panels to the left.`}
           />
         </h2>
-        <SaveButton disabled={!parsedDocx} isSaving={isSaving} onSave={onSave} />
+        <div className="flex shrink-0 items-center gap-2">
+          <UndoButton disabled={!canUndo} onUndo={onUndo} />
+          <SaveButton disabled={!parsedDocx} isSaving={isSaving} onSave={onSave} />
+        </div>
       </div>
 
       <div ref={containerRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
