@@ -63,6 +63,12 @@ function previewCss(signature: FormattingSignature): CSSProperties {
   }
 }
 
+/** "Merge content into Document B" still needs more work before it's ready
+ * for users - the trigger below stays fully wired up (state, handler,
+ * ContentMergeDialog) but hidden, rather than removed, so re-enabling it
+ * later is a one-line flip back to `true`. */
+const CONTENT_MERGE_ENABLED = false
+
 /** Left-hand panel: a read-only, best-effort rendering of word/document.xml's
  * visible text, styled per-run from the same live signatures the Style
  * Report is built from - so merges (which mutate the document's Elements in
@@ -225,25 +231,22 @@ export function DocumentPreviewPanel({
         })}
       </div>
 
-      {/* Always rendered (never conditionally mounted) so this row's height
-          never changes as Document B is attached/removed - when there's no
-          "Merge content..." button to show, an invisible one of the same
-          size holds its place instead of collapsing the row, so the preview
-          area's height above it never visibly resizes on that interaction. */}
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2">
-        <button
-          type="button"
-          onClick={onOpenContentMerge}
-          disabled={isMergingContent || referenceDoc.status !== 'loaded'}
-          aria-hidden={referenceDoc.status !== 'loaded'}
-          tabIndex={referenceDoc.status === 'loaded' ? 0 : -1}
-          className={`rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white enabled:hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 ${
-            referenceDoc.status === 'loaded' ? '' : 'invisible'
-          }`}
-        >
-          Merge content into Document B…
-        </button>
-      </div>
+      {CONTENT_MERGE_ENABLED && (
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2">
+          <button
+            type="button"
+            onClick={onOpenContentMerge}
+            disabled={isMergingContent || referenceDoc.status !== 'loaded'}
+            aria-hidden={referenceDoc.status !== 'loaded'}
+            tabIndex={referenceDoc.status === 'loaded' ? 0 : -1}
+            className={`rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white enabled:hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 ${
+              referenceDoc.status === 'loaded' ? '' : 'invisible'
+            }`}
+          >
+            Merge content into Document B…
+          </button>
+        </div>
+      )}
     </div>
   )
 }

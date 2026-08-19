@@ -16,7 +16,7 @@ function styleCount(stylesXml: XMLDocument): number {
 }
 
 describe('materializeReferenceDocStyles', () => {
-  it('materializes only the styles actually used in body text, always as character styles', () => {
+  it('materializes every defined paragraph/character style, used in body text or not, always as character styles when they carry no list numbering', () => {
     const referenceDocx = makeParsedDocx({
       documentXml: `<w:document ${W}><w:body>
         <w:p><w:r><w:rPr><w:rStyle w:val="Emph"/></w:rPr><w:t>one</w:t></w:r></w:p>
@@ -32,21 +32,25 @@ describe('materializeReferenceDocStyles', () => {
       documentXml: `<w:document ${W}><w:body><w:p><w:r><w:t>Text</w:t></w:r></w:p></w:body></w:document>`,
     })
 
-    const records = materializeReferenceDocStyles(targetDocx, referenceDocx)
+    const records = materializeReferenceDocStyles(targetDocx, referenceDocx, [])
 
-    expect(records).toHaveLength(2)
+    // All three defined styles show up, including "Unused" which never
+    // appears in Document B's own body text.
+    expect(records).toHaveLength(3)
     expect(records.every((r) => r.fromReferenceDoc)).toBe(true)
-    expect(records.map((r) => r.name).sort()).toEqual(['Emph', 'Heading 1'])
+    expect(records.map((r) => r.name).sort()).toEqual(['Emph', 'Heading 1', 'Unused'])
 
     const emphRecord = records.find((r) => r.name === 'Emph')!
     const headingRecord = records.find((r) => r.name === 'Heading 1')!
+    const unusedRecord = records.find((r) => r.name === 'Unused')!
     expect(emphRecord.targetSignature.bold).toBe(true)
     expect(headingRecord.targetSignature.italic).toBe(true)
+    expect(unusedRecord.targetSignature.strike).toBe(true)
 
     // Materialized styles are always character-type, even the one sourced
     // from Document B's paragraph style.
     const styleEls = Array.from(targetDocx.stylesXml.getElementsByTagNameNS(NS.w, 'style'))
-    expect(styleEls).toHaveLength(2)
+    expect(styleEls).toHaveLength(3)
     for (const el of styleEls) {
       expect(wAttr(el, 'type')).toBe('character')
     }
@@ -75,7 +79,7 @@ describe('materializeReferenceDocStyles', () => {
     })
     expect(targetDocx.numberingXml).toBeNull()
 
-    const records = materializeReferenceDocStyles(targetDocx, referenceDocx)
+    const records = materializeReferenceDocStyles(targetDocx, referenceDocx, [])
 
     expect(records).toHaveLength(1)
     expect(records[0].kind).toBe('paragraph')
@@ -132,7 +136,7 @@ describe('materializeReferenceDocStyles', () => {
       documentXml: `<w:document ${W}><w:body><w:p><w:r><w:t>Text</w:t></w:r></w:p></w:body></w:document>`,
     })
 
-    const records = materializeReferenceDocStyles(targetDocx, referenceDocx)
+    const records = materializeReferenceDocStyles(targetDocx, referenceDocx, [])
     const byName = (name: string) => records.find((r) => r.name === name)!
 
     expect(byName('Heading 1').listPreviewText).toBe('1.')
@@ -156,7 +160,7 @@ describe('materializeReferenceDocStyles', () => {
       </w:styles>`,
     })
 
-    const records = materializeReferenceDocStyles(targetDocx, referenceDocx)
+    const records = materializeReferenceDocStyles(targetDocx, referenceDocx, [])
 
     expect(records).toHaveLength(1)
     expect(records[0].styleId).not.toBe('Emph') // collision -> suffixed id via generateUniqueStyleId
@@ -185,13 +189,102 @@ describe('materializeReferenceDocStyles', () => {
       documentXml: `<w:document ${W}><w:body><w:p><w:r><w:t>Text</w:t></w:r></w:p></w:body></w:document>`,
     })
 
-    const records = materializeReferenceDocStyles(targetDocx, referenceDocx)
+    const records = materializeReferenceDocStyles(targetDocx, referenceDocx, [])
 
-    expect(records).toHaveLength(1)
-    expect(records[0].targetSignature.fontFamily).toBe('Georgia')
-    expect(records[0].targetSignature.fontSizeHalfPt).toBe(20)
-    expect(records[0].targetSignature.underline).toBe('single')
-    expect(records[0].targetSignature.bold).toBe(true)
+    // "Base" is never directly applied to a run in Document B (Emph only
+    // reaches it via basedOn), but it's still a defined style, so it's
+    // materialized too, alongside Emph.
+    expect(records).toHaveLength(2)
+    const emphRecord = records.find((r) => r.name === 'Emph')!
+    const baseRecord = records.find((r) => r.name === 'Base')!
+
+    expect(emphRecord.targetSignature.fontFamily).toBe('Georgia')
+    expect(emphRecord.targetSignature.fontSizeHalfPt).toBe(20)
+    expect(emphRecord.targetSignature.underline).toBe('single')
+    expect(emphRecord.targetSignature.bold).toBe(true)
+
+    // Base's own cascade: docDefaults' font/size plus its own direct
+    // underline, but none of Emph's bold (the cascade only flows
+    // basedOn -> derived style, never the other way).
+    expect(baseRecord.targetSignature.fontFamily).toBe('Georgia')
+    expect(baseRecord.targetSignature.fontSizeHalfPt).toBe(20)
+    expect(baseRecord.targetSignature.underline).toBe('single')
+    expect(baseRecord.targetSignature.bold).toBe(false)
+  })
+
+  it('replaces an existing user-created style of the same name in place, rather than adding a duplicate', () => {
+    // Simulates "attach Document B1 (defines 'Heading 1', italic), remove
+    // it, attach Document B2 (also defines 'Heading 1', but bold)" -
+    // targetDocx already carries the style B1 left behind (as
+    // materializeReferenceDocStyles itself would have written it), plus a
+    // run already merged into it.
+    const targetDocx = makeParsedDocx({
+      documentXml: `<w:document ${W}><w:body>
+        <w:p><w:r><w:rPr><w:rStyle w:val="Heading1"/></w:rPr><w:t>Already merged</w:t></w:r></w:p>
+      </w:body></w:document>`,
+      stylesXml: `<w:styles ${W}>
+        <w:style w:type="character" w:styleId="Heading1"><w:name w:val="Heading 1"/><w:rPr><w:i/></w:rPr></w:style>
+      </w:styles>`,
+    })
+    const existingUserStyles: UserStyleRecord[] = [
+      {
+        styleId: 'Heading1',
+        name: 'Heading 1',
+        targetSignature: { fontFamily: null, fontSizeHalfPt: null, colorValue: 'auto', bold: false, italic: true, underline: null, strike: false },
+        kind: 'character',
+        listFormat: 'none',
+        createdAt: 111,
+        fromReferenceDoc: true,
+      },
+      {
+        styleId: 'Manual1',
+        name: 'Manual Style',
+        targetSignature: { fontFamily: null, fontSizeHalfPt: null, colorValue: 'auto', bold: false, italic: false, underline: null, strike: false },
+        kind: 'character',
+        listFormat: 'none',
+        createdAt: 222,
+      },
+    ]
+
+    const referenceDocxB2 = makeParsedDocx({
+      documentXml: `<w:document ${W}><w:body><w:p><w:r><w:t>x</w:t></w:r></w:p></w:body></w:document>`,
+      stylesXml: `<w:styles ${W}>
+        <w:style w:type="character" w:styleId="H1"><w:name w:val="Heading 1"/><w:rPr><w:b/></w:rPr></w:style>
+        <w:style w:type="character" w:styleId="NewOne"><w:name w:val="New One"/><w:rPr><w:strike/></w:rPr></w:style>
+      </w:styles>`,
+    })
+
+    const result = materializeReferenceDocStyles(targetDocx, referenceDocxB2, existingUserStyles)
+
+    // No duplicate "Heading 1" - the old record's styleId/position/createdAt
+    // are kept, just redefined to B2's look; "Manual Style" is untouched;
+    // "New One" is appended as a genuinely new entry.
+    expect(result.map((r) => r.name)).toEqual(['Heading 1', 'Manual Style', 'New One'])
+    const heading = result.find((r) => r.name === 'Heading 1')!
+    expect(heading.styleId).toBe('Heading1')
+    expect(heading.createdAt).toBe(111)
+    expect(heading.targetSignature.bold).toBe(true)
+    expect(heading.targetSignature.italic).toBe(false)
+    const manual = result.find((r) => r.name === 'Manual Style')!
+    expect(manual).toEqual(existingUserStyles[1])
+
+    // Exactly one <w:style w:styleId="Heading1"> in Document A, redefined in
+    // place - not a second style of the same name under a new id.
+    const stylesRoot = targetDocx.stylesXml.getElementsByTagNameNS(NS.w, 'styles')[0]
+    const heading1Els = Array.from(stylesRoot.getElementsByTagNameNS(NS.w, 'style')).filter(
+      (el) => wAttr(el, 'styleId') === 'Heading1',
+    )
+    expect(heading1Els).toHaveLength(1)
+    expect(heading1Els[0].getElementsByTagNameNS(NS.w, 'b')).toHaveLength(1)
+    expect(heading1Els[0].getElementsByTagNameNS(NS.w, 'i')).toHaveLength(0)
+
+    // The run merged into "Heading1" before the swap still points at the
+    // same id, so it automatically picks up B2's bold look.
+    const styleReport = buildStyleReport(targetDocx)
+    const rStyleEls = targetDocx.documentXml.getElementsByTagNameNS(NS.w, 'rStyle')
+    expect(rStyleEls).toHaveLength(1)
+    expect(wAttr(rStyleEls[0], 'val')).toBe('Heading1')
+    expect(styleReport.some((e) => e.signature.bold === true)).toBe(true)
   })
 })
 

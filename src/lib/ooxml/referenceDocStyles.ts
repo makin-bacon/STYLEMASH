@@ -1,18 +1,22 @@
 import type { ParsedDocx, StyleEntity, UserStyleRecord } from '../../types/ooxml'
 import { mergeParagraphStyle, mergeStyles, removeStyleById } from './mergeStyles'
 import { buildStylePreviewMarker, resolveStyleListFormat } from './numbering'
-import { countOccurrencesForStyleId, buildStyleReport } from './styleReport'
+import { countOccurrencesForStyleId } from './styleReport'
 import { buildResolutionContext, buildStylesMap, getDocDefaultsRPr, resolveStyleRPr } from './styleResolution'
 import { trackedChildrenToSignature } from './signature'
 import { buildThemeColorMap, resolveColorElement } from './themeColor'
 
-/** Materializes every named style Document B actually uses in its own body
- * text as a real <w:style> in `targetDocx` (Document A)'s stylesXml - via
- * the existing mergeStyles()/mergeParagraphStyle() "+ New Style" code paths
- * (empty sourceRunRefs), so a materialized style is byte-for-byte the same
- * shape, and behaves identically as a reuse target, as any manually-created
- * UserStyleRecord. Mutates targetDocx.stylesXml (and, for a list style,
- * numberingXml) in place; referenceDocx is read-only.
+/** Materializes every paragraph/character style *defined* in Document B's
+ * stylesXml - whether or not that style is actually applied anywhere in
+ * Document B's own body text - as a real <w:style> in `targetDocx`
+ * (Document A)'s stylesXml. Uses the existing mergeStyles()/
+ * mergeParagraphStyle() "+ New Style" code paths (empty sourceRunRefs), so a
+ * materialized style is byte-for-byte the same shape, and behaves
+ * identically as a reuse target, as any manually-created UserStyleRecord.
+ * Mutates targetDocx.stylesXml (and, for a list style, numberingXml) in
+ * place; referenceDocx is read-only. Table/numbering-type style defs are
+ * skipped - this app only ever merges run-level formatting plus list
+ * numbering via a paragraph style, so neither is a meaningful target here.
  *
  * A Document B style that's itself a paragraph style carrying list
  * numbering (its own <w:pPr>/<w:numPr>, or one inherited through its
@@ -27,39 +31,44 @@ import { buildThemeColorMap, resolveColorElement } from './themeColor'
  * style and a character style achieve the identical visible result for the
  * 7 attributes StyleMash actually merges.
  *
- * "Used" means: is the origin styleId of some Style Report variant in
- * Document B whose look isn't fully masked by direct formatting (origin
- * kind 'named-character' or 'named-paragraph') - reuses the app's existing
- * notion of "where a run's formatting came from" rather than a bespoke
- * scan. A style's materialized signature is its own fully-cascaded look
- * (through Document B's own basedOn chain to Document B's own docDefaults
- * and theme) - not any particular Style Report entity's signature, which is
- * paragraph-context-dependent for character styles (see resolveRunFormatting). */
+ * A style's materialized signature is its own fully-cascaded look (through
+ * Document B's own basedOn chain to Document B's own docDefaults and theme)
+ * - not any particular Style Report entity's signature, which is
+ * paragraph-context-dependent for character styles (see resolveRunFormatting).
+ *
+ * `existingUserStyles` guards against duplicate-named entries piling up
+ * across a "remove Document B, attach a different one" cycle (or even just
+ * colliding with a manually-created style): when a Document B style's name
+ * exactly matches an existing UserStyleRecord's, the newest file wins - its
+ * definition is written into the *existing* style's styleId (via
+ * reuseExistingStyleId) rather than creating a second, differently-IDed
+ * style of the same name, so any content already merged into the old one
+ * keeps pointing at it and simply adopts the new look. Returns the full,
+ * ready-to-use replacement for `existingUserStyles` (collided entries
+ * replaced in place, genuinely-new ones appended) - callers should assign
+ * this directly rather than spreading it onto the old array. */
 export function materializeReferenceDocStyles(
   targetDocx: ParsedDocx,
   referenceDocx: ParsedDocx,
+  existingUserStyles: UserStyleRecord[],
 ): UserStyleRecord[] {
-  const styleReportB = buildStyleReport(referenceDocx)
   const stylesMapB = buildStylesMap(referenceDocx.stylesXml)
   const themeColorsB = buildThemeColorMap(referenceDocx.themeXml)
   const ctxB = buildResolutionContext(stylesMapB, getDocDefaultsRPr(referenceDocx.stylesXml), themeColorsB)
 
-  const usedStyleIds = new Set<string>()
-  for (const entity of styleReportB) {
-    for (const variant of entity.variants) {
-      if (variant.origin.kind === 'named-character' || variant.origin.kind === 'named-paragraph') {
-        usedStyleIds.add(variant.origin.styleId)
-      }
-    }
-  }
-  // Set iteration order == insertion order == styleReportB's own
-  // most-common-first order, so the resulting records land in a sensible
-  // order in the User-Created Styles panel for free.
+  const existingByName = new Map(existingUserStyles.map((r) => [r.name, r]))
+  // Keyed by the *old* (reused) styleId, since mergeStyles()/
+  // mergeParagraphStyle() always returns exactly that id back when
+  // reuseExistingStyleId is passed.
+  const replacements = new Map<string, UserStyleRecord>()
+  const brandNew: UserStyleRecord[] = []
 
-  const records: UserStyleRecord[] = []
-  for (const bStyleId of usedStyleIds) {
-    const bStyle = stylesMapB.get(bStyleId)
-    if (!bStyle) continue // defensive; origin always points at a real StyleDef
+  // Map insertion order == styles.xml document order (see buildStylesMap),
+  // so genuinely-new records land in Document B's own style-definition
+  // order in the User-Created Styles panel.
+  for (const bStyle of stylesMapB.values()) {
+    if (bStyle.type !== 'paragraph' && bStyle.type !== 'character') continue
+    const bStyleId = bStyle.id
 
     const tracked = resolveStyleRPr(bStyleId, ctxB.stylesMap, ctxB.docDefaultsTracked, ctxB.styleRPrCache)
     const signature = trackedChildrenToSignature(tracked, (colorEl) =>
@@ -74,23 +83,33 @@ export function materializeReferenceDocStyles(
       listFormat === 'none'
         ? undefined
         : buildStylePreviewMarker(bStyleId, stylesMapB, referenceDocx.numberingXml)
+
+    const collision = existingByName.get(bStyle.name)
     const newStyleId =
       listFormat === 'none'
-        ? mergeStyles(targetDocx, [], signature, bStyle.name)
-        : mergeParagraphStyle(targetDocx, [], signature, bStyle.name, listFormat)
+        ? mergeStyles(targetDocx, [], signature, bStyle.name, collision?.styleId)
+        : mergeParagraphStyle(targetDocx, [], signature, bStyle.name, listFormat, collision?.styleId)
 
-    records.push({
+    const record: UserStyleRecord = {
       styleId: newStyleId,
       name: bStyle.name,
       targetSignature: signature,
       kind: listFormat === 'none' ? 'character' : 'paragraph',
       listFormat,
       listPreviewText,
-      createdAt: Date.now(),
+      createdAt: collision?.createdAt ?? Date.now(),
       fromReferenceDoc: true,
-    })
+    }
+
+    if (collision) {
+      replacements.set(collision.styleId, record)
+    } else {
+      brandNew.push(record)
+    }
   }
-  return records
+
+  const merged = existingUserStyles.map((r) => replacements.get(r.styleId) ?? r)
+  return [...merged, ...brandNew]
 }
 
 /** The other half of the "remove Document B" lifecycle: for every

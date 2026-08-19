@@ -114,7 +114,7 @@ type Action =
   | { type: 'SAVING_STARTED' }
   | { type: 'SAVING_FINISHED' }
   | { type: 'REFERENCE_DOC_LOADING_STARTED' }
-  | { type: 'REFERENCE_DOC_LOADED'; parsedDocx: ParsedDocx; materializedRecords: UserStyleRecord[] }
+  | { type: 'REFERENCE_DOC_LOADED'; parsedDocx: ParsedDocx; userStyles: UserStyleRecord[] }
   | { type: 'REFERENCE_DOC_LOAD_ERROR'; message: string }
   | { type: 'REMOVE_REFERENCE_DOC' }
   | { type: 'OPEN_CONTENT_MERGE_DIALOG' }
@@ -281,12 +281,21 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
       return {
         ...state,
         referenceDoc: { status: 'loaded', errorMessage: null, parsedDocx: action.parsedDocx },
-        userStyles: [...state.userStyles, ...action.materializedRecords],
-        // parsedDocx (A) was mutated in place by materializeReferenceDocStyles -
-        // bump the wrapper so React re-renders. styleReport does NOT need
-        // recomputing: brand-new, not-yet-referenced <w:style> definitions
-        // can't change how any existing run in A resolves.
+        // Already the full replacement list (materializeReferenceDocStyles
+        // folds a duplicate-named style into its existing record - same
+        // styleId, redefined look - rather than appending a second one; see
+        // referenceDocStyles.ts), so this assigns directly instead of
+        // spreading onto state.userStyles.
+        userStyles: action.userStyles,
+        // parsedDocx (A) was mutated in place by materializeReferenceDocStyles.
+        // styleReport DOES need recomputing here (unlike a plain "new style
+        // with no occurrences yet" used to be able to skip it): a
+        // duplicate-name collision redefines an *existing* <w:style>'s
+        // rPr/pPr in place, and any run in A already merged into that style
+        // needs its Style Report signature (and therefore its Document
+        // Preview look) refreshed to match the newest file's definition.
         parsedDocx: state.parsedDocx ? { ...state.parsedDocx } : null,
+        styleReport: state.parsedDocx ? buildStyleReport(state.parsedDocx) : state.styleReport,
       }
 
     case 'REFERENCE_DOC_LOAD_ERROR':
@@ -477,8 +486,8 @@ export function useDocxWorkspace() {
       dispatch({ type: 'REFERENCE_DOC_LOADING_STARTED' })
       try {
         const referenceParsedDocx = await parseDocx(file)
-        const materializedRecords = materializeReferenceDocStyles(state.parsedDocx, referenceParsedDocx)
-        dispatch({ type: 'REFERENCE_DOC_LOADED', parsedDocx: referenceParsedDocx, materializedRecords })
+        const userStyles = materializeReferenceDocStyles(state.parsedDocx, referenceParsedDocx, state.userStyles)
+        dispatch({ type: 'REFERENCE_DOC_LOADED', parsedDocx: referenceParsedDocx, userStyles })
       } catch (err) {
         dispatch({
           type: 'REFERENCE_DOC_LOAD_ERROR',
@@ -486,7 +495,7 @@ export function useDocxWorkspace() {
         })
       }
     },
-    [state.parsedDocx],
+    [state.parsedDocx, state.userStyles],
   )
 
   const removeReferenceDoc = useCallback(() => dispatch({ type: 'REMOVE_REFERENCE_DOC' }), [])
